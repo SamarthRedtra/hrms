@@ -91,7 +91,7 @@ class EmployeeCheckin(Document):
 			self.shift_actual_end = shift_actual_timings.actual_end
 			self.shift_start = shift_actual_timings.start_datetime
 			self.shift_end = shift_actual_timings.end_datetime
-			self.overtime_type = shift_actual_timings.overtime_type or None
+			self.overtime_type = shift_actual_timings.overtime_type or 'Overtime'
 
 	def validate_distance_from_shift_location(self):
 		if not frappe.db.get_single_value("HR Settings", "allow_geolocation_tracking"):
