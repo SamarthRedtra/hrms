@@ -31,7 +31,9 @@
   "process_payroll_accounting_entry_based_on_employee",
   "mandatory_benefit_application",
   "column_break_zi9y",
-  "create_overtime_slip"
+  "create_overtime_slip",
+  "food_allowance_section",
+  "allocate_food_allowance"
  ],
  "fields": [
   {
@@ -191,18 +193,29 @@
    "options": "Email Account"
   },
   {
+   "fieldname": "food_allowance_section",
+   "fieldtype": "Section Break",
+   "label": "Food Allowance"
+  },
+  {
    "default": "0",
-   "description": "If checked, flexible benefits are considered only if benefit application exists",
-   "fieldname": "mandatory_benefit_application",
+   "fieldname": "allocate_food_allowance",
    "fieldtype": "Check",
-   "label": "Mandatory Benefit Application"
-  }
+   "label": "Allocate Food Allowance"
+  },
+  {
+    "default": "0",
+    "description": "If checked, flexible benefits are considered only if benefit application exists",
+    "fieldname": "mandatory_benefit_application",
+    "fieldtype": "Check",
+    "label": "Mandatory Benefit Application"
+   }
  ],
  "icon": "fa fa-cog",
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-09-02 13:28:45.007397",
+ "modified": "2025-10-04 22:35:09.501142",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Payroll Settings",

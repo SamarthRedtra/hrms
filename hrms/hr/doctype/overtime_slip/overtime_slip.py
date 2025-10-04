@@ -9,7 +9,7 @@ import frappe
 from frappe import _, bold
 from frappe.model.docstatus import DocStatus
 from frappe.model.document import Document
-from frappe.utils import cstr, flt
+from frappe.utils import cstr, flt, cint
 from frappe.utils.data import format_time, get_link_to_form, getdate
 
 from hrms.payroll.doctype.payroll_entry.payroll_entry import get_start_end_dates
@@ -174,6 +174,15 @@ class OvertimeSlip(Document):
 		for component, total_amount in overtime_components.items():
 			self.create_additional_salary(component, total_amount, precision)
 
+		# Create Additional Salary for Food Allowance based on OT thresholds, only if enabled in Payroll Settings
+		try:
+			if cint(frappe.db.get_single_value("Payroll Settings", "allocate_food_allowance")):
+				food_allowance_total = self.calculate_food_allowance_total()
+				if food_allowance_total > 0:
+					self.create_additional_salary("Food Allowance", food_allowance_total, precision)
+		except Exception as e:
+			frappe.log_error(message=str(frappe.get_traceback()),title="Error creating food allowance")
+
 	def create_additional_salary(self, salary_component, total_amount, precision=None):
 		if total_amount > 0:
 			additional_salary = frappe.get_doc(
@@ -225,6 +234,37 @@ class OvertimeSlip(Document):
 			)
 
 		return overtime_components
+
+	def calculate_food_allowance_total(self):
+		"""
+		Calculate Food Allowance based on OT duration and day type rules:
+		- Normal day: AED 15 if OT >= 3 hours
+		- Weekend/Public Holiday: AED 15 if OT >= 9 hours, AED 30 if OT >= 12 hours
+		Returns total allowance for the slip period.
+		"""
+		if not self.overtime_details:
+			return 0.0
+
+		holiday_date_map = self.get_holiday_map()
+		total_allowance = 0.0
+
+		for overtime_detail in self.overtime_details:
+			ot_hours = overtime_detail.overtime_duration or 0.0
+			date_key = cstr(overtime_detail.date)
+			holiday_info = holiday_date_map.get(date_key)
+			is_weekend = bool(holiday_info and getattr(holiday_info, "weekly_off", False))
+			is_public_holiday = bool(holiday_info and not getattr(holiday_info, "weekly_off", False))
+
+			if is_weekend or is_public_holiday:
+				if ot_hours >= 12:
+					total_allowance += 30
+				elif ot_hours >= 9:
+					total_allowance += 15
+			else:
+				if ot_hours >= 3:
+					total_allowance += 15
+
+		return total_allowance
 
 	def _bulk_load_overtime_types(self, overtime_type_names):
 		"""
@@ -306,10 +346,13 @@ class OvertimeSlip(Document):
 			for data in self._cached_salary_slip.earnings
 			if data.salary_component in components and not data.get("additional_salary", None)
 		)
-		payment_days = max(self._cached_salary_slip.payment_days, 1)
-		applicable_daily_amount = component_amount / payment_days
+		# Use fixed baseline of 30 days and 8 working hours per day for overtime additional salary
+		# This ensures hourly rate = monthly component amount / (30 days * 8 hours)
+		fixed_payment_days = 30
+		fixed_working_hours_per_day = 8 or standard_working_hours
+		applicable_daily_amount = component_amount / fixed_payment_days if fixed_payment_days else 0
 
-		return applicable_daily_amount / standard_working_hours
+		return applicable_daily_amount / fixed_working_hours_per_day if fixed_working_hours_per_day else 0.0
 
 	def _make_salary_slip(self, salary_structure):
 		from hrms.payroll.doctype.salary_structure.salary_structure import make_salary_slip
@@ -334,17 +377,20 @@ class OvertimeSlip(Document):
 		if applicable_hourly_rate <= 0:
 			return 0.0
 
+		print("overtime_details", applicable_hourly_rate, overtime_duration, overtime_date)
 		overtime_date_str = cstr(overtime_date)
 		multiplier = overtime_details.get("standard_multiplier", 1)
 
 		holiday_info = holiday_date_map.get(overtime_date_str)
 		if holiday_info:
 			if overtime_details.get("applicable_for_weekend") and holiday_info.weekly_off:
+				print("weekend_multiplier", overtime_details.get("weekend_multiplier", multiplier))
 				multiplier = overtime_details.get("weekend_multiplier", multiplier)
 			elif overtime_details.get("applicable_for_public_holiday") and not holiday_info.weekly_off:
+				print("public_holiday_multiplier", overtime_details.get("public_holiday_multiplier", multiplier))
 				multiplier = overtime_details.get("public_holiday_multiplier", multiplier)
 
-		amount = overtime_duration * applicable_hourly_rate * multiplier
+		amount = overtime_duration * (applicable_hourly_rate + multiplier)
 		return amount
 
 	def get_holiday_map(self):
