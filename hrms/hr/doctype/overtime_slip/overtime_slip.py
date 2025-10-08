@@ -390,7 +390,7 @@ class OvertimeSlip(Document):
 				print("public_holiday_multiplier", overtime_details.get("public_holiday_multiplier", multiplier))
 				multiplier = overtime_details.get("public_holiday_multiplier", multiplier)
 
-		amount = overtime_duration * (applicable_hourly_rate + multiplier)
+		amount = overtime_duration * applicable_hourly_rate * multiplier
 		return amount
 
 	def get_holiday_map(self):
