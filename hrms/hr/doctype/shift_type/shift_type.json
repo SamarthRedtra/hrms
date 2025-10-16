@@ -9,6 +9,7 @@
  "field_order": [
   "start_time",
   "end_time",
+  "location_radius_check",
   "column_break_3",
   "holiday_list",
   "color",
@@ -207,10 +208,16 @@
    "label": "Overtime Type",
    "mandatory_depends_on": "eval:doc.allow_overtime == 1",
    "options": "Overtime Type"
+  },
+  {
+   "default": "0",
+   "fieldname": "location_radius_check",
+   "fieldtype": "Check",
+   "label": "Location Radius Check"
   }
  ],
  "links": [],
- "modified": "2024-12-18 19:03:38.278336",
+ "modified": "2025-10-16 23:47:56.543391",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "Shift Type",
@@ -251,6 +258,7 @@
   }
  ],
  "quick_entry": 1,
+ "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],

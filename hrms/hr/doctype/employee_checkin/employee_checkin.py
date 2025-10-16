@@ -30,8 +30,9 @@ class EmployeeCheckin(Document):
 		self.validate_duplicate_log()
 		self.validate_time_change()
 		self.fetch_shift()
-		self.set_geolocation()
-		self.validate_distance_from_shift_location()
+		if self.get('location_radius_check') == 1:
+			self.set_geolocation()
+			self.validate_distance_from_shift_location()
 
 	def validate_duplicate_log(self):
 		doc = frappe.db.exists(
