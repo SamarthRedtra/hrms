@@ -480,6 +480,10 @@ class SalarySlip(TransactionBase):
 			return
 
 		holidays = self.get_holidays_for_employee(self.start_date, self.end_date)
+
+		# Set preview actual_working_days same as working_days and return
+		# (actual inclusion of holidays worked is handled in full computation below)
+
 		working_days_list = [add_days(getdate(self.start_date), days=day) for day in range(0, working_days)]
 
 		if not cint(payroll_settings.include_holidays_in_total_working_days):
@@ -488,6 +492,47 @@ class SalarySlip(TransactionBase):
 			working_days -= len(holidays)
 			if working_days < 0:
 				frappe.throw(_("There are more holidays than working days this month."))
+
+		# Compute actual_working_days:
+		# keep working_days as-is; only add holidays that were actually worked when
+		# holidays are excluded from working_days per settings
+		try:
+			if not cint(payroll_settings.include_holidays_in_total_working_days):
+				Attendance = frappe.qb.DocType("Attendance")
+				# Count full-day Present on holidays within the period
+				present_on_holidays = (
+					frappe.qb.from_(Attendance)
+					.select(Count("*"))
+					.where(
+						(Attendance.employee == self.employee)
+						& (Attendance.docstatus == 1)
+						& (Attendance.status == "Present")
+						& (Attendance.attendance_date.isin(holidays))
+					)
+				).run()[0][0]
+				# Count half-day Present on holidays within the period
+				half_present_on_holidays = (
+					frappe.qb.from_(Attendance)
+					.select(Count("*"))
+					.where(
+						(Attendance.employee == self.employee)
+						& (Attendance.docstatus == 1)
+						& (Attendance.status == "Half Day")
+						& (Attendance.half_day_status == "Present")
+						& (Attendance.attendance_date.isin(holidays))
+					)
+				).run()[0][0]
+				self.actual_working_days = flt(
+					working_days
+					+ flt(present_on_holidays)
+					+ (flt(daily_wages_fraction_for_half_day) * flt(half_present_on_holidays))
+				)
+			else:
+				# Holidays already included in working_days as per settings
+				self.actual_working_days = flt(working_days)
+		except Exception:
+			# In case of any failure, do not block payroll; fallback to working_days
+			self.actual_working_days = flt(working_days)
 
 		if not payroll_settings.payroll_based_on:
 			frappe.throw(_("Please set Payroll based on in Payroll settings"))
@@ -515,6 +560,94 @@ class SalarySlip(TransactionBase):
 		self.total_working_days = working_days
 
 		payment_days = self.get_payment_days(payroll_settings.include_holidays_in_total_working_days)
+
+		# Build pending deductions summary from future Additional Salary deduction components
+		try:
+			AS = frappe.qb.DocType("Additional Salary")
+			SalaryComponent = frappe.qb.DocType("Salary Component")
+			# One-time future deductions after this slip period
+			one_time = (
+				frappe.qb.from_(AS)
+				.join(SalaryComponent)
+				.on(AS.salary_component == SalaryComponent.name)
+				.select(AS.salary_component, AS.amount)
+				.where(
+					(AS.employee == self.employee)
+					& (AS.company == self.company)
+					& (AS.docstatus == 1)
+					& (AS.disabled == 0)
+					& (SalaryComponent.type == "Deduction")
+					& (AS.is_recurring == 0)
+					& (AS.payroll_date > self.actual_end_date)
+				)
+			).run(as_dict=True)
+			# Recurring future deductions: multiply by remaining months after this period
+			recurring = (
+				frappe.qb.from_(AS)
+				.join(SalaryComponent)
+				.on(AS.salary_component == SalaryComponent.name)
+				.select(AS.salary_component, AS.amount, AS.from_date, AS.to_date)
+				.where(
+					(AS.employee == self.employee)
+					& (AS.company == self.company)
+					& (AS.docstatus == 1)
+					& (AS.disabled == 0)
+					& (SalaryComponent.type == "Deduction")
+					& (AS.is_recurring == 1)
+					& (AS.to_date >= self.actual_end_date)
+				)
+			).run(as_dict=True)
+
+			pending_rows = []
+			pending_total = 0.0
+			# oneshot
+			for d in (one_time or []):
+				pending_total += flt(d.amount)
+				pending_rows.append({"component": d.salary_component, "amount": flt(d.amount)})
+
+			# recurring by months remaining (monthly assumption)
+			from frappe.utils import add_months, get_first_day
+			next_month_start = add_months(get_first_day(self.actual_end_date), 1)
+			for d in (recurring or []):
+				start = next_month_start
+				if d.from_date and getdate(d.from_date) > start:
+					start = get_first_day(d.from_date)
+				# Cap the end to the AS.to_date if present; otherwise to current payroll period end if available
+				end = None
+				if d.to_date:
+					end = getdate(d.to_date)
+				elif getattr(self, "payroll_period", None):
+					end = getdate(self.payroll_period.end_date)
+				# If no meaningful end, skip to avoid infinite horizon
+				months = 0
+				if end and start <= end:
+					cur = get_first_day(start)
+					while cur <= end:
+						months += 1
+						cur = add_months(cur, 1)
+				amount = flt(d.amount) * months
+				if amount:
+					pending_total += amount
+					pending_rows.append({"component": d.salary_component, "amount": amount})
+
+			self.pending_balance = flt(pending_total)
+			if pending_rows:
+				rows = "".join(
+					"<tr><td>{0}</td><td class='text-right'>{1:.2f}</td></tr>".format(
+						frappe.utils.escape_html(r["component"]), flt(r["amount"])
+					)
+					for r in pending_rows
+				)
+				self.balance_html = (
+					"<div class='penalty-balance'><b>Pending Deductions</b><table class='table table-bordered'>"
+					+ "<thead><tr><th>Component</th><th class='text-right'>Amount</th></tr></thead><tbody>"
+					+ rows
+					+ "<tr><th>Total</th><th class='text-right'>{0:.2f}</th></tr></tbody></table></div>".format(flt(pending_total))
+				)
+		except Exception:
+			pass
+
+		# payment_days remains as default behavior; actual_working_days captures weekend work separately
 
 		if flt(payment_days) > flt(lwp):
 			self.payment_days = flt(payment_days) - flt(lwp)
@@ -680,8 +813,16 @@ class SalarySlip(TransactionBase):
 			if not leave:
 				continue
 
-			if not leave.include_holiday and getdate(d) in holidays:
-				continue
+			# Treat holidays falling within a continuous leave span as leave as well (behind setting)
+			if getdate(d) in holidays and cint(frappe.db.get_single_value("Payroll Settings", "strict_weekoff_leave_holiday_policy")):
+				if leave.include_holiday:
+					pass
+				else:
+					# If leave spans multiple days, include the holiday as leave day
+					if getdate(leave.from_date) == getdate(leave.to_date):
+						# single-day leave on a holiday behaves as per include_holiday (skip)
+						continue
+					# else: fall through and count as leave
 
 			equivalent_lwp_count = 0
 			fraction_of_daily_salary_per_leave = flt(leave.fraction_of_daily_salary_per_leave)
@@ -866,6 +1007,34 @@ class SalarySlip(TransactionBase):
 		self.set_net_pay()
 		if not skip_tax_breakup_computation:
 			self.compute_income_tax_breakup()
+
+		# Add current-period Additional Salary deductions summary to balance_html
+		try:
+			current_rows = []
+			total_current = 0.0
+			for d in (self.get("deductions") or []):
+				if getattr(d, "additional_salary", None):
+					total_current += flt(d.amount)
+					current_rows.append({"component": d.salary_component, "amount": flt(d.amount)})
+
+			if total_current:
+				rows = "".join(
+					"<tr><td>{0}</td><td class='text-right'>{1:.2f}</td></tr>".format(
+						frappe.utils.escape_html(r["component"]), flt(r["amount"])
+					)
+					for r in current_rows
+				)
+				current_html = (
+					"<div class='penalty-balance'><b>To Deduct This Slip (Additional Salary)</b>"
+					+ "<table class='table table-bordered'>"
+					+ "<thead><tr><th>Component</th><th class='text-right'>Amount</th></tr></thead><tbody>"
+					+ rows
+					+ "<tr><th>Total</th><th class='text-right'>{0:.2f}</th></tr></tbody></table></div>".format(flt(total_current))
+				)
+				self.balance_html = (current_html + (self.balance_html or ""))
+				self._current_additional_salary_deduction_total = flt(total_current)
+		except Exception:
+			pass
 
 	def set_net_pay(self):
 		self.total_deduction = self.get_component_totals("deductions")

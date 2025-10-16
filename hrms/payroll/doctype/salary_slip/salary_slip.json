@@ -43,6 +43,7 @@
   "column_break_geio",
   "absent_days",
   "payment_days",
+  "actual_working_days",
   "help_section",
   "payment_days_calculation_help",
   "earnings_and_deductions_tab",
@@ -102,7 +103,10 @@
   "bank_name",
   "bank_account_no",
   "leave_details_section",
-  "leave_details"
+  "leave_details",
+  "pending_fine_balance_tab",
+  "pending_balance",
+  "balance_html"
  ],
  "fields": [
   {
@@ -757,13 +761,38 @@
    "options": "Employee Benefit Detail",
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "actual_working_days",
+   "fieldtype": "Float",
+   "label": "Actual Working Days",
+   "oldfieldname": "payment_days",
+   "oldfieldtype": "Float",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "pending_fine_balance_tab",
+   "fieldtype": "Tab Break",
+   "label": "Pending Fine Balance"
+  },
+  {
+   "fieldname": "pending_balance",
+   "fieldtype": "Float",
+   "label": "Pending Balance To Be Paid",
+   "precision": "2"
+  },
+  {
+   "fieldname": "balance_html",
+   "fieldtype": "HTML",
+   "label": "Balance HTML"
   }
  ],
  "icon": "fa fa-file-text",
  "idx": 9,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-09-19 21:25:42.584589",
+ "modified": "2025-10-16 22:58:36.639511",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Salary Slip",

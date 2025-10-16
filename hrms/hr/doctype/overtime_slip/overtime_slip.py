@@ -168,20 +168,39 @@ class OvertimeSlip(Document):
 		return records
 
 	def process_overtime_slip(self):
-		overtime_components = self.get_overtime_component_amounts()
+		overtime_components, ot_calc_lines = self.get_overtime_component_amounts()
 
 		precision = frappe.db.get_single_value("System Settings", "currency_precision") or 2
 		for component, total_amount in overtime_components.items():
 			self.create_additional_salary(component, total_amount, precision)
 
 		# Create Additional Salary for Food Allowance based on OT thresholds, only if enabled in Payroll Settings
+		food_calc_lines = []
 		try:
 			if cint(frappe.db.get_single_value("Payroll Settings", "allocate_food_allowance")):
-				food_allowance_total = self.calculate_food_allowance_total()
+				food_allowance_total, food_calc_lines = self.calculate_food_allowance_total()
 				if food_allowance_total > 0:
 					self.create_additional_salary("Food Allowance", food_allowance_total, precision)
 		except Exception as e:
 			frappe.log_error(message=str(frappe.get_traceback()),title="Error creating food allowance")
+
+		# Add calculation history comment for debugging
+		try:
+			comment_parts = []
+			comment_parts.append(_("Overtime Calculation Details"))
+			comment_parts.append(_(f"Normal OT Hours: {flt(getattr(self, 'normal_ot_hours', 0.0))}, Holiday OT Hours: {flt(getattr(self, 'holiday_ot_hours', 0.0))}"))
+			if ot_calc_lines:
+				comment_parts.append(_("Breakdown:"))
+				for line in ot_calc_lines:
+					comment_parts.append(line)
+			if food_calc_lines:
+				comment_parts.append(_("Food Allowance Calculation:"))
+				for line in food_calc_lines:
+					comment_parts.append(line)
+			self.add_comment(comment_type="Info", text="<br>".join(comment_parts))
+		except Exception:
+			# do not fail submission due to comment issues
+			pass
 
 	def create_additional_salary(self, salary_component, total_amount, precision=None):
 		if total_amount > 0:
@@ -212,6 +231,9 @@ class OvertimeSlip(Document):
 		self.overtime_types = self._bulk_load_overtime_types(unique_overtime_types)
 		holiday_date_map = self.get_holiday_map()
 		overtime_components = {}
+		normal_hours_sum = 0.0
+		holiday_hours_sum = 0.0
+		calc_lines = []
 
 		for overtime_detail in self.overtime_details:
 			overtime_type = overtime_detail.overtime_type
@@ -220,7 +242,7 @@ class OvertimeSlip(Document):
 				overtime_type, overtime_detail.get("standard_working_hours")
 			)
 
-			overtime_amount = self.calculate_overtime_amount(
+			overtime_amount, meta = self.calculate_overtime_amount(
 				overtime_type,
 				applicable_hourly_rate,
 				overtime_detail.overtime_duration,
@@ -233,7 +255,28 @@ class OvertimeSlip(Document):
 				overtime_components.get(salary_component, 0) + overtime_amount
 			)
 
-		return overtime_components
+			# accumulate normal vs holiday hours and build calc lines
+			ot_hours = overtime_detail.overtime_duration or 0.0
+			if meta.get("day_type") == "Normal":
+				normal_hours_sum += ot_hours
+			else:
+				holiday_hours_sum += ot_hours
+			calc_lines.append(
+				_(f"{cstr(overtime_detail.date)}: {ot_hours}h, type={meta.get('day_type')}, rate={flt(applicable_hourly_rate)}, multiplier={meta.get('multiplier')} -> amount={flt(overtime_amount)}")
+			)
+
+		# persist hours on the document
+		try:
+			self.db_set("normal_ot_hours", flt(normal_hours_sum), update_modified=False)
+			self.db_set("holiday_ot_hours", flt(holiday_hours_sum), update_modified=False)
+		except Exception:
+			# field may not exist; ignore silently
+			pass
+
+		# also set attributes for comment composition
+		self.normal_ot_hours = normal_hours_sum
+		self.holiday_ot_hours = holiday_hours_sum
+		return overtime_components, calc_lines
 
 	def calculate_food_allowance_total(self):
 		"""
@@ -243,10 +286,11 @@ class OvertimeSlip(Document):
 		Returns total allowance for the slip period.
 		"""
 		if not self.overtime_details:
-			return 0.0
+			return 0.0, []
 
 		holiday_date_map = self.get_holiday_map()
 		total_allowance = 0.0
+		calc_lines = []
 
 		for overtime_detail in self.overtime_details:
 			ot_hours = overtime_detail.overtime_duration or 0.0
@@ -258,13 +302,16 @@ class OvertimeSlip(Document):
 			if is_weekend or is_public_holiday:
 				if ot_hours >= 12:
 					total_allowance += 30
+					calc_lines.append(_(f"{date_key}: {ot_hours}h (Weekend/Holiday) -> +30"))
 				elif ot_hours >= 9:
 					total_allowance += 15
+					calc_lines.append(_(f"{date_key}: {ot_hours}h (Weekend/Holiday) -> +15"))
 			else:
 				if ot_hours >= 3:
 					total_allowance += 15
+					calc_lines.append(_(f"{date_key}: {ot_hours}h (Normal) -> +15"))
 
-		return total_allowance
+		return total_allowance, calc_lines
 
 	def _bulk_load_overtime_types(self, overtime_type_names):
 		"""
@@ -372,26 +419,29 @@ class OvertimeSlip(Document):
 		"""
 		overtime_details = self.overtime_types.get(overtime_type)
 		if not overtime_details:
-			return 0.0
+			return 0.0, {"multiplier": 1, "day_type": "Normal"}
 
 		if applicable_hourly_rate <= 0:
-			return 0.0
+			return 0.0, {"multiplier": 1, "day_type": "Normal"}
 
 		print("overtime_details", applicable_hourly_rate, overtime_duration, overtime_date)
 		overtime_date_str = cstr(overtime_date)
 		multiplier = overtime_details.get("standard_multiplier", 1)
+		day_type = "Normal"
 
 		holiday_info = holiday_date_map.get(overtime_date_str)
 		if holiday_info:
 			if overtime_details.get("applicable_for_weekend") and holiday_info.weekly_off:
 				print("weekend_multiplier", overtime_details.get("weekend_multiplier", multiplier))
 				multiplier = overtime_details.get("weekend_multiplier", multiplier)
+				day_type = "Weekend"
 			elif overtime_details.get("applicable_for_public_holiday") and not holiday_info.weekly_off:
 				print("public_holiday_multiplier", overtime_details.get("public_holiday_multiplier", multiplier))
 				multiplier = overtime_details.get("public_holiday_multiplier", multiplier)
+				day_type = "Public Holiday"
 
 		amount = overtime_duration * applicable_hourly_rate * multiplier
-		return amount
+		return amount, {"multiplier": multiplier, "day_type": day_type}
 
 	def get_holiday_map(self):
 		from erpnext.setup.doctype.employee.employee import get_holiday_list_for_employee

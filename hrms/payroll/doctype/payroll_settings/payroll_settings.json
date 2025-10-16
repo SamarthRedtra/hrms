@@ -11,6 +11,7 @@
   "consider_unmarked_attendance_as",
   "include_holidays_in_total_working_days",
   "consider_marked_attendance_on_holidays",
+  "strict_weekoff_leave_holiday_policy",
   "column_break_6",
   "max_working_hours_against_timesheet",
   "daily_wages_fraction_for_half_day",
@@ -155,6 +156,13 @@
    "fieldname": "consider_marked_attendance_on_holidays",
    "fieldtype": "Check",
    "label": "Consider Marked Attendance on Holidays"
+  },
+  {
+   "default": "0",
+   "description": "If enabled, count holidays within multi-day leave spans as leave, and pay week-off only if there was work in that week",
+   "fieldname": "strict_weekoff_leave_holiday_policy",
+   "fieldtype": "Check",
+   "label": "Apply Week-off Pay Only If Worked + Holiday-in-Leave Rule"
   },
   {
    "depends_on": "eval:doc.email_salary_slip_to_employee",
