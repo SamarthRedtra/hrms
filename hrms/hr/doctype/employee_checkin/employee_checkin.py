@@ -209,6 +209,7 @@ def mark_attendance_and_link_log(
 	out_time=None,
 	shift=None,
 	overtime_type=None,
+	project=None,
 ):
 	"""Creates an attendance and links the attendance to the Employee Checkin.
 	Note: If attendance is already present for the given date, the logs are marked as skipped and no exception is thrown.
@@ -220,6 +221,7 @@ def mark_attendance_and_link_log(
 	"""
 	log_names = [x.name for x in logs]
 	employee = logs[0].employee
+	project = project or next((getattr(log, "project", None) for log in logs if getattr(log, "project", None)), None)
 
 	if attendance_status == "Skip":
 		skip_attendance_in_checkins(log_names)
@@ -242,6 +244,7 @@ def mark_attendance_and_link_log(
 			in_time=in_time,
 			out_time=out_time,
 			overtime_type=overtime_type,
+			project=project,
 		)
 
 		if attendance_status == "Absent":
@@ -268,22 +271,27 @@ def create_or_update_attendance(
 	in_time=None,
 	out_time=None,
 	overtime_type=None,
+	project=None,
 ):
 	"""Creates a new attendance or updates an existing half-day attendance."""
 	if attendance := get_existing_half_day_attendance(employee, attendance_date):
+		values = {
+			"working_hours": working_hours,
+			"shift": shift,
+			"late_entry": late_entry,
+			"early_exit": early_exit,
+			"in_time": in_time,
+			"out_time": out_time,
+			"half_day_status": "Absent" if attendance_status == "Absent" else "Present",
+			"modify_half_day_status": 0,
+		}
+		if project:
+			values["project"] = project
+
 		frappe.db.set_value(
 			"Attendance",
 			attendance.name,
-			{
-				"working_hours": working_hours,
-				"shift": shift,
-				"late_entry": late_entry,
-				"early_exit": early_exit,
-				"in_time": in_time,
-				"out_time": out_time,
-				"half_day_status": "Absent" if attendance_status == "Absent" else "Present",
-				"modify_half_day_status": 0,
-			},
+			values,
 		)
 		return frappe.get_doc("Attendance", attendance.name)
 	else:
@@ -302,6 +310,8 @@ def create_or_update_attendance(
 				"out_time": out_time,
 			}
 		)
+		if project:
+			attendance.update({"project": project})
 
 		# Set overtime data if applicable
 		if overtime_type and attendance_status == "Present":

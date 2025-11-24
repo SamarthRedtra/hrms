@@ -48,7 +48,7 @@ class BulkEmployeeChekin(Document):
 		return query.run(as_dict=True)
 
 	@frappe.whitelist()
-	def bulk_create_checkins(self, employees: list, log_type: str | None = None, time: str | None = None, device_id: str | None = None, latitude: float | None = None, longitude: float | None = None, skip_auto_attendance: int | None = None) -> None:
+	def bulk_create_checkins(self, employees: list, log_type: str | None = None, time: str | None = None, device_id: str | None = None, latitude: float | None = None, longitude: float | None = None, skip_auto_attendance: int | None = None, project: str | None = None) -> None:
 		# Only company and at least one employee are mandatory here; type/time can be provided via dialog
 		validate_bulk_tool_fields(self, ["company"], employees)
 
@@ -80,9 +80,10 @@ class BulkEmployeeChekin(Document):
 			latitude=latitude,
 			longitude=longitude,
 			skip_auto_attendance=skip_auto_attendance,
+			project=project,
 		)
 
-	def _bulk_create_checkins(self, employees: list, log_type: str | None = None, time: str | None = None, device_id: str | None = None, latitude: float | None = None, longitude: float | None = None, skip_auto_attendance: int | None = None) -> None:
+	def _bulk_create_checkins(self, employees: list, log_type: str | None = None, time: str | None = None, device_id: str | None = None, latitude: float | None = None, longitude: float | None = None, skip_auto_attendance: int | None = None , project: str | None = None) -> None:
 		success, failure = [], []
 		count = 0
 		savepoint = "before_checkin_insert"
@@ -96,6 +97,7 @@ class BulkEmployeeChekin(Document):
 				doc.time = time or getattr(self, "time", frappe.utils.now_datetime())
 				doc.device_id = device_id or getattr(self, "device_id", None)
 				doc.log_type = log_type or getattr(self, "log_type", None)
+				doc.project = project or getattr(self, "project", None)
 				doc.latitude = latitude if latitude is not None else getattr(self, "latitude", None)
 				doc.longitude = longitude if longitude is not None else getattr(self, "longitude", None)
 				if frappe.utils.cint(skip_auto_attendance if skip_auto_attendance is not None else getattr(self, "skip_auto_attendance", 0)) == 1:
