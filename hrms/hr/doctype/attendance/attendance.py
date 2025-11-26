@@ -271,7 +271,7 @@ class Attendance(Document):
 			return 0
 
 		# Build a temporary salary slip to read component amounts
-		from hrms.payroll.doctype.overtime_slip.overtime_slip import OvertimeSlip
+		from hrms.hr.doctype.overtime_slip.overtime_slip import OvertimeSlip
 
 		slip = OvertimeSlip()._make_salary_slip(sal_struct)
 		if not slip or not slip.earnings:
