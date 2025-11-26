@@ -10,18 +10,26 @@ frappe.ui.form.on("Bulk Employee Chekin", {
     },
     onload(frm) {
         console.log("onload");
-        const ensure_company = () => {
+        const ensure_defaults = async () => {
             try {
                 const default_company = frappe?.defaults?.get_default && frappe.defaults.get_default("company");
                 if (default_company && !frm.doc.company) {
-                    return frm.set_value("company", default_company);
+                    await frm.set_value("company", default_company);
                 }
             } catch (e) {
                 // no-op if defaults not available
             }
-            return Promise.resolve();
+
+            try {
+                const today = frappe?.datetime?.get_today && frappe.datetime.get_today();
+                if (today && !frm.doc.date) {
+                    await frm.set_value("date", today);
+                }
+            } catch (e) {
+                // ignore if datetime util not available
+            }
         };
-        ensure_company().then(() => {
+        ensure_defaults().then(() => {
             // render placeholder table immediately, then load data
             frm.events.render_employees_datatable(frm, []);
             frm.trigger("get_employees");
@@ -77,6 +85,10 @@ frappe.ui.form.on("Bulk Employee Chekin", {
         frm.trigger("get_employees");
     },
 
+    date(frm) {
+        frm.trigger("get_employees");
+    },
+
     time(frm) {
         // time change may enable action button state
     },
@@ -95,6 +107,11 @@ frappe.ui.form.on("Bulk Employee Chekin", {
     },
 
     get_employees(frm) {
+        if (!frm.doc.date) {
+            frm.events.render_employees_datatable(frm, []);
+            return;
+        }
+
         frm.call({
             method: "get_employees",
             args: {},
@@ -113,6 +130,17 @@ frappe.ui.form.on("Bulk Employee Chekin", {
 
         const field = frm.get_field("employees_html");
         if (!field || !field.$wrapper) return;
+        const $wrapper = field.$wrapper;
+        if (!frm.bec_route_bound) {
+            $wrapper.on("click", ".bec-route", (e) => {
+                e.preventDefault();
+                const target = e.currentTarget;
+                const doctype = target.getAttribute("data-doctype");
+                const name = target.getAttribute("data-name");
+                if (doctype && name) frappe.set_route("Form", doctype, name);
+            });
+            frm.bec_route_bound = true;
+        }
 
         // Prefer shared renderer if available (consistent behavior across bulk tools)
         if (
@@ -146,11 +174,16 @@ frappe.ui.form.on("Bulk Employee Chekin", {
             return;
         }
 
-        const $wrapper = field.$wrapper;
         $wrapper.empty();
 
         // Fallback renderer when frappe.DataTable is not available: simple HTML table with checkboxes
         if (!(typeof frappe !== "undefined" && typeof frappe.DataTable === "function")) {
+            const make_route_link = (doctype, name, label) => {
+                if (!name) return "";
+                const safe_label = frappe.utils.escape_html(label || name);
+                const safe_name = frappe.utils.escape_html(name);
+                return `<a class="bec-route" data-doctype="${doctype}" data-name="${safe_name}" href="#">${safe_label}</a>`;
+            };
             const table = $(
                 '<table class="table table-bordered table-hover">\
                     <thead>\
@@ -160,6 +193,10 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                             <th>' + __("Name") + '</th>\
                             <th>' + __("Branch") + '</th>\
                             <th>' + __("Department") + '</th>\
+                            <th>' + __("In Time") + '</th>\
+                            <th>' + __("In Project") + '</th>\
+                            <th>' + __("Out Time") + '</th>\
+                            <th>' + __("Out Project") + '</th>\
                         </tr>\
                     </thead>\
                     <tbody></tbody>\
@@ -168,12 +205,16 @@ frappe.ui.form.on("Bulk Employee Chekin", {
 
             const $tbody = table.find("tbody");
             if (!employees || !employees.length) {
-                const colspan = 5;
+                const colspan = 8;
                 $tbody.append(
                     '<tr><td colspan="' + colspan + '" class="text-muted">' + no_data_message + '</td></tr>'
                 );
             } else {
                 employees.forEach((row) => {
+                    const in_time = row.in_time ? make_route_link("Employee Checkin", row.in_checkin, row.in_time) : "";
+                    const out_time = row.out_time ? make_route_link("Employee Checkin", row.out_checkin, row.out_time) : "";
+                    const in_project = row.in_project ? make_route_link("Project", row.in_project, row.in_project) : "";
+                    const out_project = row.out_project ? make_route_link("Project", row.out_project, row.out_project) : "";
                     const tr = $(
                         '<tr>\
                             <td><input type="checkbox" class="bec-row-checkbox" data-employee="' + frappe.utils.escape_html(row.employee) + '"></td>\
@@ -181,6 +222,10 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                             <td>' + frappe.utils.escape_html(row.employee_name || "") + '</td>\
                             <td>' + frappe.utils.escape_html(row.branch || "") + '</td>\
                             <td>' + frappe.utils.escape_html(row.department || "") + '</td>\
+                            <td>' + in_time + '</td>\
+                            <td>' + in_project + '</td>\
+                            <td>' + out_time + '</td>\
+                            <td>' + out_project + '</td>\
                         </tr>'
                     );
                     $tbody.append(tr);
@@ -240,10 +285,68 @@ frappe.ui.form.on("Bulk Employee Chekin", {
             { name: "employee_name", id: "employee_name", content: __("Name"), editable: false, focusable: false },
             { name: "branch", id: "branch", content: __("Branch"), editable: false, focusable: false },
             { name: "department", id: "department", content: __("Department"), editable: false, focusable: false },
+            {
+                name: "in_time",
+                id: "in_time",
+                content: __("In Time"),
+                editable: false,
+                focusable: false,
+                formatter: (_, row) => {
+                    if (row.in_time && row.in_checkin) {
+                        const name = frappe.utils.escape_html(row.in_checkin);
+                        const label = frappe.utils.escape_html(row.in_time);
+                        return `<a class="bec-route" data-doctype="Employee Checkin" data-name="${name}" href="#">${label}</a>`;
+                    }
+                    return frappe.utils.escape_html(row.in_time || "");
+                },
+            },
+            {
+                name: "in_project",
+                id: "in_project",
+                content: __("In Project"),
+                editable: false,
+                focusable: false,
+                formatter: (_, row) => {
+                    if (row.in_project) {
+                        const name = frappe.utils.escape_html(row.in_project);
+                        return `<a class="bec-route" data-doctype="Project" data-name="${name}" href="#">${name}</a>`;
+                    }
+                    return "";
+                },
+            },
+            {
+                name: "out_time",
+                id: "out_time",
+                content: __("Out Time"),
+                editable: false,
+                focusable: false,
+                formatter: (_, row) => {
+                    if (row.out_time && row.out_checkin) {
+                        const name = frappe.utils.escape_html(row.out_checkin);
+                        const label = frappe.utils.escape_html(row.out_time);
+                        return `<a class="bec-route" data-doctype="Employee Checkin" data-name="${name}" href="#">${label}</a>`;
+                    }
+                    return frappe.utils.escape_html(row.out_time || "");
+                },
+            },
+            {
+                name: "out_project",
+                id: "out_project",
+                content: __("Out Project"),
+                editable: false,
+                focusable: false,
+                formatter: (_, row) => {
+                    if (row.out_project) {
+                        const name = frappe.utils.escape_html(row.out_project);
+                        return `<a class="bec-route" data-doctype="Project" data-name="${name}" href="#">${name}</a>`;
+                    }
+                    return "";
+                },
+            },
         ].map((x) => ({ ...x, dropdown: false, align: "left" }));
     },
 
-    open_checkin_dialog(frm) {
+    async open_checkin_dialog(frm) {
         // gather selected employees first
         const selected_employees = [];
         if (frm.employees_datatable) {
@@ -259,6 +362,13 @@ frappe.ui.form.on("Bulk Employee Chekin", {
             });
         }
 
+        let project_required = false;
+        try {
+            project_required = await frappe.db.get_single_value("Payroll Settings", "project_mandatory_for_checkin");
+        } catch (e) {
+            // ignore; server validation will handle
+        }
+
         if (typeof hrms !== "undefined" && typeof hrms.validate_mandatory_fields === "function") {
             hrms.validate_mandatory_fields(frm, selected_employees);
         } else if (!selected_employees.length) {
@@ -271,9 +381,9 @@ frappe.ui.form.on("Bulk Employee Chekin", {
             title: __("Add Checkin for {0} employee(s)", [selected_employees.length]),
             fields: [
                 { fieldname: "log_type", fieldtype: "Select", label: __("Log Type"), options: "\nIN\nOUT", reqd: 1 },
-                { fieldname: "time", fieldtype: "Datetime", label: __("Time"), default: "Now", reqd: 1 },
+                { fieldname: "time", fieldtype: "Datetime", label: __("Time"), reqd: 1 },
                 { fieldname: "device_id", fieldtype: "Data", label: __("Location / Device ID") },
-                { fieldname: "project", fieldtype: "Link", label: __("Project"), options: "Project" },
+                { fieldname: "project", fieldtype: "Link", label: __("Project"), options: "Project", reqd: project_required ? 1 : 0 },
                 { fieldname: "skip_auto_attendance", fieldtype: "Check", label: __("Skip Auto Attendance") },
             ],
             primary_action_label: __("Create"),
@@ -295,8 +405,15 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                 });
             },
         });
+
+        // Pre-fill time with selected filter date + current time (ISO format to avoid moment warnings)
+        const nowTime = frappe?.datetime?.now_time ? frappe.datetime.now_time() : null;
+        const today = frappe?.datetime?.now_datetime ? frappe.datetime.now_datetime() : null;
+        if (frm.doc.date && nowTime) {
+            dialog.set_value("time", `${frm.doc.date} ${nowTime}`);
+        } else if (today) {
+            dialog.set_value("time", today);
+        }
         dialog.show();
     },
 });
-
-

@@ -3,7 +3,7 @@
 
 
 import unicodedata
-from datetime import date
+from datetime import date, time
 
 import frappe
 from frappe import _, msgprint
@@ -23,6 +23,7 @@ from frappe.utils import (
 	get_last_day,
 	get_link_to_form,
 	getdate,
+	get_datetime,
 	money_in_words,
 	rounded,
 )
@@ -39,6 +40,11 @@ from hrms.payroll.doctype.employee_benefit_ledger.employee_benefit_ledger import
 	create_employee_benefit_ledger_entry,
 	delete_employee_benefit_ledger_entry,
 )
+from hrms.payroll.doctype.salary_structure_assignment.salary_structure_assignment import (
+	get_assigned_salary_structure,
+)
+from hrms.hr.doctype.overtime_slip.overtime_slip import OvertimeSlip
+from hrms.hr.doctype.shift_assignment.shift_assignment import get_shift_for_timestamp
 from hrms.payroll.doctype.payroll_entry.payroll_entry import get_salary_withholdings, get_start_end_dates
 from hrms.payroll.doctype.payroll_period.payroll_period import (
 	get_payroll_period,
@@ -168,6 +174,7 @@ class SalarySlip(TransactionBase):
 		self.compute_month_to_date()
 		self.compute_component_wise_year_to_date()
 
+		self.build_attendance_breakup()
 		self.add_leave_balances()
 
 		max_working_hours = frappe.db.get_single_value(
@@ -184,6 +191,271 @@ class SalarySlip(TransactionBase):
 
 		if self.payroll_period and not self.current_payroll_period:
 			self.current_payroll_period = self.payroll_period.name
+
+	def build_attendance_breakup(self):
+		"""Attach detailed attendance with checkin/out, project, OT per day."""
+		if not (self.start_date and self.end_date and self.employee):
+			return
+
+		checkins = frappe.db.get_all(
+			"Employee Checkin",
+			fields=["time", "log_type", "project", "name"],
+			filters={
+				"employee": self.employee,
+				"time": ["between", [get_datetime(self.start_date), get_datetime(add_days(self.end_date, 1))]],
+			},
+			order_by="time asc",
+		)
+
+		by_date = {}
+		for row in checkins:
+			by_date.setdefault(getdate(row.time), []).append(row)
+
+		total_regular_seconds = 0
+		total_ot_seconds = 0
+		total_ot_amount = 0
+
+		ot_meta_by_date = self._get_overtime_amounts_by_date()
+
+		self.set("attendance_breakup", [])
+		for day in sorted(by_date.keys()):
+			day_rows = sorted(by_date[day], key=lambda r: r.time)
+			total_seconds = self._compute_total_seconds(day_rows)
+			reg_seconds = total_seconds
+
+			first_in = next((r for r in day_rows if r.log_type == "IN"), None)
+			last_out = next((r for r in reversed(day_rows) if r.log_type == "OUT"), None)
+			status = "Present" if total_seconds else "Absent"
+
+			ot_amount = None
+			ot_hours = 0
+			std_hours = None
+			meta_project = None
+			meta_rate = None
+			meta_multiplier = None
+
+			if ot_meta_by_date and day in ot_meta_by_date:
+				meta = ot_meta_by_date[day]
+				ot_amount = meta.get("ot_amount")
+				ot_hours = meta.get("ot_hours") or 0
+				if meta.get("standard_working_hours"):
+					std_hours = meta.get("standard_working_hours")
+				meta_project = meta.get("project")
+				meta_rate = meta.get("rate")
+				meta_multiplier = meta.get("multiplier")
+
+			if std_hours is None:
+				std_hours = self._get_standard_working_hours(day)
+
+			# If no OT from slip, derive OT hours as anything beyond standard_working_hours (fallback 8h)
+			if ot_hours == 0:
+				baseline_hours = std_hours if std_hours else 8
+				derived_ot_seconds = total_seconds - baseline_hours * 3600 if total_seconds > baseline_hours * 3600 else 0
+				ot_hours = flt(derived_ot_seconds / 3600, 2)
+
+			ot_seconds = ot_hours * 3600
+			# If we know standard working hours, cap regular to that baseline
+			if std_hours:
+				reg_seconds = min(total_seconds, std_hours * 3600)
+			else:
+				reg_seconds = max(total_seconds - ot_seconds, 0)
+
+			if ot_amount is None:
+				ot_amount = self._compute_ot_amount(ot_seconds, day)
+
+			project_value = meta_project if meta_project else (first_in.project if first_in and first_in.project else None)
+
+			self.append(
+				"attendance_breakup",
+				{
+					"date": day,
+					"attendance_status": status,
+					"check_in": first_in.time if first_in else None,
+					"check_out": last_out.time if last_out else None,
+					"project": project_value,
+					"regular_hours": flt(reg_seconds / 3600, 2),
+					"overtime_hours": flt(ot_hours, 2),
+					"overtime_amount": ot_amount,
+					"standard_working_hours": std_hours,
+					"rate": meta_rate,
+					"multiplier": meta_multiplier,
+				},
+			)
+
+			total_regular_seconds += reg_seconds
+			total_ot_seconds += ot_seconds
+			total_ot_amount += ot_amount
+
+		self.total_regular_hours = flt(total_regular_seconds / 3600, 2)
+		self.total_overtime_hours = flt(total_ot_seconds / 3600, 2)
+		self.total_overtime_amount = flt(total_ot_amount, 2)
+
+	def _compute_total_seconds(self, rows):
+		total = 0
+		in_time = None
+		for row in rows:
+			if row.log_type == "IN":
+				in_time = row.time
+			elif row.log_type == "OUT" and in_time:
+				diff = (row.time - in_time).total_seconds()
+				if diff > 0:
+					total += diff
+				in_time = None
+		return total
+
+	def _compute_ot_amount(self, ot_seconds, on_date=None):
+		hour_rate = self._get_hourly_rate(on_date)
+		return flt((ot_seconds / 3600) * hour_rate, 2) if hour_rate else 0
+
+	def _get_hourly_rate(self, on_date=None):
+		if flt(self.hour_rate):
+			return flt(self.hour_rate)
+		salary_structure = get_assigned_salary_structure(self.employee, getdate(on_date) if on_date else None)
+		if salary_structure:
+			return flt(frappe.db.get_value("Salary Structure", salary_structure, "hour_rate")) or 0
+		return 0
+
+	def _get_overtime_amounts_by_date(self):
+		"""
+		Map of date -> meta (ot_amount, ot_hours, standard_working_hours, project, rate, multiplier)
+		derived from submitted Overtime Slips or Attendance (rate/multiplier) fallback.
+		If no overtime slips are found, returns empty dict.
+		"""
+		slip_names = frappe.get_all(
+			"Overtime Slip",
+			filters={
+				"employee": self.employee,
+				"docstatus": 1,
+				"start_date": ("<=", self.end_date),
+				"end_date": (">=", self.start_date),
+			},
+			pluck="name",
+		)
+
+		details = frappe.get_all(
+			"Overtime Details",
+			filters={
+				"parent": ["in", slip_names] if slip_names else None,
+				"date": ["between", [self.start_date, self.end_date]],
+			},
+			fields=[
+				"parent",
+				"date",
+				"overtime_type",
+				"overtime_duration",
+				"standard_working_hours",
+				"overtime_amount",
+				"project",
+				"rate",
+				"multiplier",
+			],
+		)
+		if not details and not slip_names:
+			details = []
+
+		# group details by parent slip for efficient processing
+		details_by_parent = {}
+		for d in details:
+			details_by_parent.setdefault(d.parent, []).append(d)
+
+		by_date_meta = {}
+		for slip_name, rows in details_by_parent.items():
+			try:
+				slip_doc = frappe.get_doc("Overtime Slip", slip_name)
+			except Exception:
+				continue
+
+			overtime_types = slip_doc._bulk_load_overtime_types({r.overtime_type for r in rows})
+			slip_doc.overtime_types = overtime_types
+			holiday_map = slip_doc.get_holiday_map()
+
+			for row in rows:
+				# use stored overtime_amount if present
+				if row.overtime_amount:
+					amount = flt(row.overtime_amount)
+				else:
+					applicable_hourly_rate = slip_doc._get_applicable_hourly_rate(
+						row.overtime_type, row.get("standard_working_hours")
+					)
+					amount, _ = slip_doc.calculate_overtime_amount(
+						row.overtime_type,
+						applicable_hourly_rate,
+						row.overtime_duration,
+						row.date,
+						holiday_map,
+					)
+				date_key = getdate(row.date)
+				meta = by_date_meta.setdefault(
+					date_key,
+					{
+						"ot_amount": 0,
+						"ot_hours": 0,
+						"standard_working_hours": row.get("standard_working_hours"),
+						"project": row.get("project"),
+						"rate": None,
+						"multiplier": None,
+					},
+				)
+				meta["ot_amount"] = flt(meta["ot_amount"]) + flt(amount)
+				meta["ot_hours"] = flt(meta.get("ot_hours") or 0) + flt(row.overtime_duration or 0)
+				if row.get("standard_working_hours"):
+					meta["standard_working_hours"] = row.get("standard_working_hours")
+				if row.get("project"):
+					meta["project"] = row.get("project")
+				if row.get("rate"):
+					meta["rate"] = row.get("rate")
+				if row.get("multiplier"):
+					meta["multiplier"] = row.get("multiplier")
+
+		# fallback to attendance-based OT if no OT slip rows found for dates
+		if not by_date_meta:
+			attendance_rows = frappe.get_all(
+				"Attendance",
+				filters={
+					"employee": self.employee,
+					"attendance_date": ["between", [self.start_date, self.end_date]],
+					"docstatus": 1,
+					"actual_overtime_duration": [">", 0],
+				},
+				fields=[
+					"attendance_date",
+					"project",
+					"actual_overtime_duration",
+					"standard_working_hours",
+					"rate",
+					"multiplier",
+				],
+			)
+			for r in attendance_rows:
+				date_key = getdate(r.attendance_date)
+				amount = 0
+				if r.rate:
+					amount = flt(r.actual_overtime_duration or 0) * flt(r.rate) * flt(r.multiplier or 1)
+				by_date_meta[date_key] = {
+					"ot_amount": flt(amount, 2),
+					"ot_hours": flt(r.actual_overtime_duration or 0),
+					"standard_working_hours": r.get("standard_working_hours"),
+					"project": r.get("project"),
+					"rate": r.get("rate"),
+					"multiplier": r.get("multiplier"),
+				}
+
+		return by_date_meta
+
+	def _get_standard_working_hours(self, day):
+		"""Compute standard working hours from shift assignment/shift type for the given date."""
+		try:
+			# Use noon to resolve shift for the day
+			ts = get_datetime(f"{day} 12:00:00")
+			shift_details = get_shift_for_timestamp(self.employee, ts)
+			if shift_details and shift_details.get("start_datetime") and shift_details.get("end_datetime"):
+				diff = shift_details.get("end_datetime") - shift_details.get("start_datetime")
+				if diff.total_seconds() > 0:
+					return flt(diff.total_seconds() / 3600, 2)
+		except Exception:
+			# fallback handled by caller
+			pass
+		return None
 
 	def check_salary_withholding(self):
 		withholding = get_salary_withholdings(self.start_date, self.end_date, self.employee)

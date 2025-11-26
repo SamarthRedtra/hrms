@@ -104,6 +104,12 @@
   "bank_account_no",
   "leave_details_section",
   "leave_details",
+  "attendance_breakup_section",
+  "attendance_breakup",
+  "column_break_att",
+  "total_regular_hours",
+  "total_overtime_hours",
+  "total_overtime_amount",
   "pending_fine_balance_tab",
   "pending_balance",
   "balance_html"
@@ -527,6 +533,42 @@
    "fieldtype": "Table",
    "label": "Leave Details",
    "options": "Salary Slip Leave",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attendance_breakup_section",
+   "fieldtype": "Section Break",
+   "label": "Attendance Details"
+  },
+  {
+   "fieldname": "attendance_breakup",
+   "fieldtype": "Table",
+   "label": "Attendance Breakup",
+   "options": "Salary Slip Attendance Detail",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_att",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_regular_hours",
+   "fieldtype": "Float",
+   "label": "Total Regular Hours",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_overtime_hours",
+   "fieldtype": "Float",
+   "label": "Total Overtime Hours",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_overtime_amount",
+   "fieldtype": "Currency",
+   "label": "Total Overtime Amount",
    "read_only": 1
   },
   {

@@ -9,10 +9,14 @@
   "reference_document",
   "date",
   "overtime_type",
+  "project",
+  "rate",
   "column_break_ilza",
   "overtime_duration",
   "standard_working_hours",
-  "maximum_overtime_hours_allowed"
+  "maximum_overtime_hours_allowed",
+  "overtime_amount",
+  "multiplier"
  ],
  "fields": [
   {
@@ -62,12 +66,35 @@
    "fieldtype": "Float",
    "label": "Standard Working Hours",
    "reqd": 1
+  },
+  {
+   "fieldname": "overtime_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Overtime amount"
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "options": "Project"
+  },
+  {
+   "fieldname": "rate",
+   "fieldtype": "Float",
+   "label": "Rate"
+  },
+  {
+   "fieldname": "multiplier",
+   "fieldtype": "Float",
+   "label": "Multiplier"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-08-13 11:32:52.884936",
+ "modified": "2025-11-27 03:30:22.211856",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "Overtime Details",

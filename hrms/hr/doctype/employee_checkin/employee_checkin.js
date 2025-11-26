@@ -17,6 +17,11 @@ frappe.ui.form.on("Employee Checkin", {
 			"HR Settings",
 			"allow_geolocation_tracking",
 		);
+		const project_required = await frappe.db.get_single_value(
+			"Payroll Settings",
+			"project_mandatory_for_checkin",
+		);
+		frm.set_df_property("project", "reqd", project_required ? 1 : 0);
 
 		if (!allow_geolocation_tracking) {
 			hide_field(["fetch_geolocation", "latitude", "longitude", "geolocation"]);

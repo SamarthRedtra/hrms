@@ -29,6 +29,7 @@ class EmployeeCheckin(Document):
 		validate_active_employee(self.employee)
 		self.validate_duplicate_log()
 		self.validate_time_change()
+		self.validate_project_requirement()
 		self.fetch_shift()
 		if self.get('location_radius_check') == 1:
 			self.set_geolocation()
@@ -58,6 +59,13 @@ class EmployeeCheckin(Document):
 					"An attendance record is linked to this checkin. Please cancel the attendance before modifying time."
 				),
 			)
+
+	def validate_project_requirement(self):
+		if not frappe.db.get_single_value("Payroll Settings", "project_mandatory_for_checkin"):
+			return
+
+		if not self.project:
+			frappe.throw(_("Project is mandatory for check-in/check-out."), title=_("Missing Project"))
 
 	@frappe.whitelist()
 	def set_geolocation(self):

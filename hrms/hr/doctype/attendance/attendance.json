@@ -31,6 +31,8 @@
   "early_exit",
   "amended_from",
   "modify_half_day_status",
+  "rate",
+  "multiplier",
   "overtime_section",
   "overtime_type",
   "actual_overtime_duration",
@@ -260,13 +262,23 @@
    "fieldtype": "Link",
    "label": "Project",
    "options": "Project"
+  },
+  {
+   "fieldname": "rate",
+   "fieldtype": "Currency",
+   "label": "Rate"
+  },
+  {
+   "fieldname": "multiplier",
+   "fieldtype": "Float",
+   "label": "multiplier"
   }
  ],
  "icon": "fa fa-ok",
  "idx": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-11-24 10:23:07.160833",
+ "modified": "2025-11-27 03:32:41.877613",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "Attendance",

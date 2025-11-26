@@ -34,7 +34,8 @@
   "column_break_zi9y",
   "create_overtime_slip",
   "food_allowance_section",
-  "allocate_food_allowance"
+  "allocate_food_allowance",
+  "project_mandatory_for_checkin"
  ],
  "fields": [
   {
@@ -192,6 +193,13 @@
    "fieldname": "create_overtime_slip",
    "fieldtype": "Check",
    "label": "Create Overtime Slip For Eligible Employee(s)"
+  },
+  {
+   "default": "0",
+   "description": "If enabled, project selection is mandatory on all employee check-ins/outs and will be shown with the log.",
+   "fieldname": "project_mandatory_for_checkin",
+   "fieldtype": "Check",
+   "label": "Project Mandatory For Check-in/Out"
   },
   {
    "depends_on": "eval:doc.email_salary_slip_to_employee",

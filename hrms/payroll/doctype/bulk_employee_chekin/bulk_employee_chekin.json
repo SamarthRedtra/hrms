@@ -6,6 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "quick_filters_section",
+  "date",
   "company",
   "branch",
   "department",
@@ -20,10 +21,17 @@
  ],
  "fields": [
   {
-   "collapsible": 1,
-   "fieldname": "quick_filters_section",
-   "fieldtype": "Section Break",
-   "label": "Quick Filters"
+  "collapsible": 1,
+  "fieldname": "quick_filters_section",
+  "fieldtype": "Section Break",
+  "label": "Quick Filters"
+ },
+  {
+   "default": "Today",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "reqd": 1
   },
   {
    "fieldname": "company",

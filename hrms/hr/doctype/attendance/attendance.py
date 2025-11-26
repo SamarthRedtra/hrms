@@ -48,6 +48,7 @@ class Attendance(Document):
 		self.validate_overlapping_shift_attendance()
 		self.validate_employee_status()
 		self.check_leave_record()
+		self.populate_overtime_rate_and_multiplier()
 
 	def on_cancel(self):
 		self.unlink_attendance_from_checkins()
@@ -199,9 +200,94 @@ class Attendance(Document):
 					),
 					alert=1,
 				)
-		elif self.leave_type:
-			self.leave_type = None
-			self.leave_application = None
+
+	def populate_overtime_rate_and_multiplier(self):
+		"""
+		Set OT rate/multiplier on Attendance even when no OT Slip is created.
+		- If an Overtime Type is set, reuse its calculation logic (same as OT Slip).
+		- Otherwise, fall back to salary-structure hourly rate with multiplier 1.
+		"""
+		if not self.actual_overtime_duration:
+			return
+
+		# if already set, don't override
+		if self.rate and self.multiplier:
+			return
+
+		# Try Overtime Type logic first
+		applicable_rate = 0
+		applicable_multiplier = 1
+
+		if self.overtime_type:
+			try:
+				overtime_type = frappe.get_cached_doc("Overtime Type", self.overtime_type)
+				# rate
+				if overtime_type.overtime_calculation_method == "Fixed Hourly Rate":
+					applicable_rate = overtime_type.hourly_rate or 0
+				elif overtime_type.overtime_calculation_method == "Salary Component Based":
+					applicable_rate = self._calculate_component_based_rate(overtime_type)
+
+				# multiplier: use standard multiplier as default
+				applicable_multiplier = overtime_type.standard_multiplier or 1
+			except Exception:
+				pass
+
+		# fallback: salary structure hour_rate if still empty
+		if not applicable_rate:
+			from hrms.payroll.doctype.salary_structure_assignment.salary_structure_assignment import (
+				get_assigned_salary_structure,
+			)
+
+			sal_struct = get_assigned_salary_structure(self.employee, getdate(self.attendance_date))
+			if sal_struct:
+				applicable_rate = frappe.db.get_value("Salary Structure", sal_struct, "hour_rate") or 0
+			if not applicable_rate and frappe.db.has_column("Employee", "hourly_rate"):
+				applicable_rate = frappe.db.get_value("Employee", self.employee, "hourly_rate") or 0
+
+		self.rate = applicable_rate or 0
+		self.multiplier = applicable_multiplier or 1
+
+	def _calculate_component_based_rate(self, overtime_type_doc):
+		"""
+		Compute hourly rate based on salary components listed on the Overtime Type.
+		Matches OT Slip behavior: monthly component sum / (30 days * 8 hours).
+		"""
+		component_rows = frappe.get_all(
+			"Overtime Salary Component",
+			filters={"parent": overtime_type_doc.name},
+			fields=["salary_component"],
+		)
+		if not component_rows:
+			return 0
+
+		components = [row.salary_component for row in component_rows]
+
+		from hrms.payroll.doctype.salary_structure_assignment.salary_structure_assignment import (
+			get_assigned_salary_structure,
+		)
+
+		sal_struct = get_assigned_salary_structure(self.employee, getdate(self.attendance_date))
+		if not sal_struct:
+			return 0
+
+		# Build a temporary salary slip to read component amounts
+		from hrms.payroll.doctype.overtime_slip.overtime_slip import OvertimeSlip
+
+		slip = OvertimeSlip()._make_salary_slip(sal_struct)
+		if not slip or not slip.earnings:
+			return 0
+
+		component_amount = sum(
+			data.amount for data in slip.earnings if data.salary_component in components and not data.get("additional_salary")
+		)
+		fixed_payment_days = 30
+		fixed_working_hours_per_day = 8
+		if not fixed_payment_days or not fixed_working_hours_per_day:
+			return 0
+		return component_amount / (fixed_payment_days * fixed_working_hours_per_day)
+		# elif self.leave_type:
+		# 	self.leave_type = None
+		# 	self.leave_application = None
 
 	def validate_employee(self):
 		emp = frappe.db.sql(

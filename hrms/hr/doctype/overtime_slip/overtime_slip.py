@@ -128,16 +128,17 @@ class OvertimeSlip(Document):
 				)
 
 			if overtime_duration > 0:
-				self.append(
-					"overtime_details",
-					{
-						"reference_document": record.name,
-						"date": record.attendance_date,
-						"overtime_type": record.overtime_type,
-						"overtime_duration": overtime_duration,
-						"standard_working_hours": record.standard_working_hours,
-					},
-				)
+					self.append(
+						"overtime_details",
+						{
+							"reference_document": record.name,
+							"date": record.attendance_date,
+							"overtime_type": record.overtime_type,
+							"overtime_duration": overtime_duration,
+							"standard_working_hours": record.standard_working_hours,
+							"project": record.get("project"),
+						},
+					)
 
 	def get_attendance_records(self):
 		records = []
@@ -150,6 +151,7 @@ class OvertimeSlip(Document):
 					"overtime_type",
 					"actual_overtime_duration",
 					"standard_working_hours",
+					"project",
 				],
 				filters={
 					"employee": self.employee,
@@ -231,6 +233,8 @@ class OvertimeSlip(Document):
 		self.overtime_types = self._bulk_load_overtime_types(unique_overtime_types)
 		holiday_date_map = self.get_holiday_map()
 		overtime_components = {}
+		child_updates = []
+		attendance_updates = []
 		normal_hours_sum = 0.0
 		holiday_hours_sum = 0.0
 		calc_lines = []
@@ -255,6 +259,17 @@ class OvertimeSlip(Document):
 				overtime_components.get(salary_component, 0) + overtime_amount
 			)
 
+			# persist calculated amount on child row for downstream usage (salary slips)
+			overtime_detail.overtime_amount = flt(overtime_amount)
+			overtime_detail.rate = flt(applicable_hourly_rate)
+			overtime_detail.multiplier = flt(meta.get("multiplier"))
+			if overtime_detail.name:
+				child_updates.append((overtime_detail.name, overtime_amount, applicable_hourly_rate, meta.get("multiplier")))
+			if overtime_detail.reference_document:
+				attendance_updates.append(
+					(overtime_detail.reference_document, applicable_hourly_rate, meta.get("multiplier"))
+				)
+
 			# accumulate normal vs holiday hours and build calc lines
 			ot_hours = overtime_detail.overtime_duration or 0.0
 			if meta.get("day_type") == "Normal":
@@ -276,6 +291,36 @@ class OvertimeSlip(Document):
 		# also set attributes for comment composition
 		self.normal_ot_hours = normal_hours_sum
 		self.holiday_ot_hours = holiday_hours_sum
+
+		# update stored child values to reflect calculated amounts
+		for child_name, amount, rate, multiplier in child_updates:
+			try:
+				frappe.db.set_value(
+					"Overtime Details",
+					child_name,
+					{
+						"overtime_amount": flt(amount),
+						"rate": flt(rate),
+						"multiplier": flt(multiplier),
+					},
+				)
+			except Exception:
+				pass
+
+		# push rate and multiplier back to Attendance rows when linked
+		for att_name, rate, multiplier in attendance_updates:
+			try:
+				frappe.db.set_value(
+					"Attendance",
+					att_name,
+					{
+						"rate": flt(rate),
+						"multiplier": flt(multiplier),
+					},
+				)
+			except Exception:
+				pass
+
 		return overtime_components, calc_lines
 
 	def calculate_food_allowance_total(self):
