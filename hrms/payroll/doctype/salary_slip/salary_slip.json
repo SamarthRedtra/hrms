@@ -106,6 +106,7 @@
   "leave_details",
   "attendance_breakup_section",
   "attendance_breakup",
+  "project_costing_json",
   "column_break_att",
   "total_regular_hours",
   "total_overtime_hours",
@@ -545,6 +546,12 @@
    "fieldtype": "Table",
    "label": "Attendance Breakup",
    "options": "Salary Slip Attendance Detail",
+   "read_only": 1
+  },
+  {
+   "fieldname": "project_costing_json",
+   "fieldtype": "JSON",
+   "label": "Project Costing Summary",
    "read_only": 1
   },
   {

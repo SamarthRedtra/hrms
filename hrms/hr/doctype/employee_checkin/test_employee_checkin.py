@@ -129,25 +129,32 @@ class TestEmployeeCheckin(IntegrationTestCase):
 			"First Check-in and Last Check-out",
 			"Every Valid Check-in and Check-out",
 		]
+		base_time = now_datetime()
 		logs_type_1 = [
-			{"time": now_datetime() - timedelta(minutes=390)},
-			{"time": now_datetime() - timedelta(minutes=300)},
-			{"time": now_datetime() - timedelta(minutes=270)},
-			{"time": now_datetime() - timedelta(minutes=90)},
-			{"time": now_datetime() - timedelta(minutes=0)},
+			{"time": base_time - timedelta(minutes=390)},
+			{"time": base_time - timedelta(minutes=300)},
+			{"time": base_time - timedelta(minutes=270)},
+			{"time": base_time - timedelta(minutes=90)},
+			{"time": base_time},
 		]
 		logs_type_2 = [
-			{"time": now_datetime() - timedelta(minutes=390), "log_type": "OUT"},
-			{"time": now_datetime() - timedelta(minutes=360), "log_type": "IN"},
-			{"time": now_datetime() - timedelta(minutes=300), "log_type": "OUT"},
-			{"time": now_datetime() - timedelta(minutes=290), "log_type": "IN"},
-			{"time": now_datetime() - timedelta(minutes=260), "log_type": "OUT"},
-			{"time": now_datetime() - timedelta(minutes=240), "log_type": "IN"},
-			{"time": now_datetime() - timedelta(minutes=150), "log_type": "IN"},
-			{"time": now_datetime() - timedelta(minutes=60), "log_type": "OUT"},
+			{"time": base_time - timedelta(minutes=390), "log_type": "OUT"},
+			{"time": base_time - timedelta(minutes=360), "log_type": "IN"},
+			{"time": base_time - timedelta(minutes=300), "log_type": "OUT"},
+			{"time": base_time - timedelta(minutes=290), "log_type": "IN"},
+			{"time": base_time - timedelta(minutes=260), "log_type": "OUT"},
+			{"time": base_time - timedelta(minutes=240), "log_type": "IN"},
+			{"time": base_time - timedelta(minutes=150), "log_type": "IN"},
+			{"time": base_time - timedelta(minutes=60), "log_type": "OUT"},
 		]
 		logs_type_1 = [frappe._dict(x) for x in logs_type_1]
 		logs_type_2 = [frappe._dict(x) for x in logs_type_2]
+		flexible_logs = [
+			{"time": base_time - timedelta(minutes=900), "log_type": "OUT"},
+			{"time": base_time - timedelta(minutes=480), "log_type": "IN"},
+			{"time": base_time - timedelta(minutes=60), "log_type": "OUT"},
+		]
+		flexible_logs = [frappe._dict(x) for x in flexible_logs]
 
 		working_hours = calculate_working_hours(logs_type_1, check_in_out_type[0], working_hours_calc_type[0])
 		self.assertEqual(working_hours, (6.5, logs_type_1[0].time, logs_type_1[-1].time))
@@ -165,6 +172,14 @@ class TestEmployeeCheckin(IntegrationTestCase):
 			[logs_type_2[1], logs_type_2[-1]], check_in_out_type[1], working_hours_calc_type[1]
 		)
 		self.assertEqual(working_hours, (5.0, logs_type_2[1].time, logs_type_2[-1].time))
+
+		working_hours = calculate_working_hours(
+			flexible_logs,
+			check_in_out_type[1],
+			working_hours_calc_type[0],
+			flexible_pairing=True,
+		)
+		self.assertEqual(working_hours, (7.0, flexible_logs[1].time, flexible_logs[2].time))
 
 	def test_fetch_shift(self):
 		employee = make_employee("test_employee_checkin@example.com", company="_Test Company")

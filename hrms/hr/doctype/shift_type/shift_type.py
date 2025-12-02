@@ -2,7 +2,7 @@
 # For license information, please see license.txt
 
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from itertools import groupby
 
 import frappe
@@ -107,14 +107,22 @@ class ShiftType(Document):
 			return
 
 		logs = self.get_employee_checkins()
-		group_key = lambda x: (x["employee"], x["shift_start"])  # noqa
-		for key, group in groupby(sorted(logs, key=group_key), key=group_key):
+		
+		if cint(self.enable_flexible_log_pairing):
+			# For flexible pairing, group by employee and actual IN time date
+			grouped_logs = self._group_logs_by_in_time(logs)
+		else:
+			# Standard grouping by shift_start
+			group_key = lambda x: (x["employee"], x["shift_start"])  # noqa
+			grouped_logs = groupby(sorted(logs, key=group_key), key=group_key)
+		
+		for key, group in grouped_logs:
 			single_shift_logs = list(group)
-			attendance_date = key[1].date()
-			employee = key[0]
-
-			if not self.should_mark_attendance(employee, attendance_date):
+			if not single_shift_logs:
 				continue
+			
+			employee = key[0]
+			attendance_date = key[1] if isinstance(key[1], date) else key[1].date()
 
 			overtime_type = single_shift_logs[0].get("overtime_type")
 			(
@@ -125,6 +133,9 @@ class ShiftType(Document):
 				in_time,
 				out_time,
 			) = self.get_attendance(single_shift_logs)
+
+			if not self.should_mark_attendance(employee, attendance_date):
+				continue
 
 			mark_attendance_and_link_log(
 				single_shift_logs,
@@ -188,7 +199,10 @@ class ShiftType(Document):
 		"""
 		late_entry = early_exit = False
 		total_working_hours, in_time, out_time = calculate_working_hours(
-			logs, self.determine_check_in_and_check_out, self.working_hours_calculation_based_on
+			logs,
+			self.determine_check_in_and_check_out,
+			self.working_hours_calculation_based_on,
+			flexible_pairing=cint(self.enable_flexible_log_pairing),
 		)
 		if (
 			cint(self.enable_late_entry_marking)
@@ -375,6 +389,50 @@ class ShiftType(Document):
 						),
 					}
 				).insert(ignore_permissions=True)
+
+	def _group_logs_by_in_time(self, logs):
+		"""Group logs by employee and the date of the first IN punch for flexible night shifts."""
+		from collections import defaultdict
+		
+		# Sort logs by employee and time
+		sorted_logs = sorted(logs, key=lambda x: (x["employee"], x["time"]))
+		
+		# Group by employee first
+		employee_groups = defaultdict(list)
+		for log in sorted_logs:
+			employee_groups[log["employee"]].append(log)
+		
+		# For each employee, find IN times and group logs around them
+		result = []
+		for employee, emp_logs in employee_groups.items():
+			# Group logs by IN time date, pairing each IN with subsequent OUTs until next IN
+			date_groups = defaultdict(list)
+			current_in_date = None
+			
+			for log in emp_logs:
+				log_type = log.get("log_type")
+				
+				if log_type == "IN":
+					# Start a new group with this IN's date
+					current_in_date = log["time"].date()
+					date_groups[current_in_date].append(log)
+				elif log_type == "OUT":
+					if current_in_date:
+						# Associate this OUT with the current IN's date
+						date_groups[current_in_date].append(log)
+					# If no current_in_date, this is an orphaned OUT - skip it
+				else:
+					# For logs without log_type, use shift_start date as fallback
+					fallback_date = log.get("shift_start")
+					if fallback_date:
+						fallback_date = fallback_date.date() if hasattr(fallback_date, "date") else fallback_date
+						date_groups[fallback_date].append(log)
+			
+			# Convert to list of tuples matching the groupby format
+			for in_date, group_logs in sorted(date_groups.items()):
+				result.append(((employee, in_date), iter(group_logs)))
+		
+		return result
 
 
 def update_last_sync_of_checkin():

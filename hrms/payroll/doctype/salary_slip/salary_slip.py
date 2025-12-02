@@ -175,6 +175,7 @@ class SalarySlip(TransactionBase):
 		self.compute_component_wise_year_to_date()
 
 		self.build_attendance_breakup()
+		self.build_project_costing_summary()
 		self.add_leave_balances()
 
 		max_working_hours = frappe.db.get_single_value(
@@ -289,6 +290,60 @@ class SalarySlip(TransactionBase):
 		self.total_regular_hours = flt(total_regular_seconds / 3600, 2)
 		self.total_overtime_hours = flt(total_ot_seconds / 3600, 2)
 		self.total_overtime_amount = flt(total_ot_amount, 2)
+
+	def build_project_costing_summary(self):
+		"""Aggregate daily attendance rows into project-wise costing JSON payload."""
+		self.project_costing_json = None
+
+		attendance_rows = self.get("attendance_breakup") or []
+		if not attendance_rows:
+			return
+
+		project_counts = {}
+		for row in attendance_rows:
+			project = getattr(row, "project", None)
+			if not project:
+				continue
+
+			worked_hours = flt(getattr(row, "regular_hours", 0)) + flt(getattr(row, "overtime_hours", 0))
+			status = cstr(getattr(row, "attendance_status", "")).strip().lower()
+
+			if worked_hours <= 0 and status in {"absent", "leave", "half day"}:
+				continue
+
+			project_counts[project] = project_counts.get(project, 0) + 1
+
+		if not project_counts:
+			return
+
+		total_reference_amount = flt(self.net_pay) or flt(self.gross_pay)
+		total_days_tracked = sum(project_counts.values())
+		per_day_cost = 0
+
+		if total_reference_amount and total_days_tracked:
+			per_day_cost = total_reference_amount / total_days_tracked
+		elif total_reference_amount and flt(self.payment_days):
+			per_day_cost = total_reference_amount / flt(self.payment_days)
+
+		employee_name = self.employee_name or frappe.db.get_value("Employee", self.employee, "employee_name")
+
+		project_costing_rows = []
+		for project_name in sorted(project_counts.keys()):
+			no_of_days = project_counts[project_name]
+			cost = flt(per_day_cost * no_of_days, 2) if per_day_cost else 0
+
+			project_costing_rows.append(
+				{
+					"project_name": project_name,
+					"no_of_days": no_of_days,
+					"cost": cost,
+					"employee": self.employee,
+					"employee_name": employee_name or "",
+				}
+			)
+
+		if project_costing_rows:
+			self.project_costing_json = frappe.as_json(project_costing_rows)
 
 	def _compute_total_seconds(self, rows):
 		total = 0

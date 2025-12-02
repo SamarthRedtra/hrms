@@ -5,9 +5,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt, get_datetime, getdate
 
-from hrms.payroll.doctype.salary_structure_assignment.salary_structure_assignment import (
-	get_assigned_salary_structure,
-)
+UNASSIGNED_LABEL = _("Unassigned")
+DEFAULT_OT_META = {"hours": 0, "amount": 0}
 
 
 def execute(filters=None):
@@ -37,7 +36,6 @@ def get_columns():
 		{"label": _("Overtime Hours"), "fieldname": "overtime_hours", "fieldtype": "Float", "precision": 2, "width": 120},
 		{"label": _("Overtime Cost"), "fieldname": "overtime_cost", "fieldtype": "Currency", "width": 120},
 		{"label": _("Actual Hours"), "fieldname": "actual_hours", "fieldtype": "Float", "precision": 2, "width": 110},
-		{"label": _("Hourly Rate"), "fieldname": "hourly_rate", "fieldtype": "Currency", "width": 110},
 		{"label": _("Cost"), "fieldname": "cost", "fieldtype": "Currency", "width": 120},
 	]
 
@@ -64,41 +62,40 @@ def get_data(filters: dict):
 		checkins = []
 
 	ot_map = get_overtime_by_employee_project(filters)
+	project_cost_map = get_project_cost_map(filters)
 
 	# group by employee and project
 	grouped: dict[tuple[str, str], list] = defaultdict(list)
 	for row in checkins:
-		key = (row.employee, row.project or _("Unassigned"))
+		key = (row.employee, row.project or UNASSIGNED_LABEL)
 		grouped[key].append(row)
 
-	result = []
-	# include keys that have OT but no checkins
-	for (employee, project), ot_vals in ot_map.items():
-		grouped.setdefault((employee, project), [])
+	all_keys = set(grouped.keys())
+	all_keys.update(ot_map.keys())
+	all_keys.update(project_cost_map.keys())
 
-	for (employee, project), rows in grouped.items():
-		rows_sorted = sorted(rows, key=lambda r: r.time) if rows else []
-		total_seconds = compute_total_seconds(rows_sorted) if rows_sorted else 0
-		ot_meta = ot_map.get((employee, project), {"hours": 0, "amount": 0})
-		overtime_seconds = ot_meta.get("hours", 0) * 3600
-		overtime_cost = ot_meta.get("amount", 0)
+	result = []
+	for employee, project in all_keys:
+		rows = grouped.get((employee, project), [])
+		total_seconds = compute_total_seconds(rows) if rows else 0
+		ot_meta = ot_map.get((employee, project), DEFAULT_OT_META)
+		overtime_seconds = (ot_meta.get("hours") or 0) * 3600
+		overtime_cost = ot_meta.get("amount") or 0
 
 		actual_seconds = max(total_seconds - overtime_seconds, 0)
-		emp_name = rows_sorted[0].employee_name if rows_sorted else ""
-		hourly_rate = get_employee_hourly_rate(employee, filters.get("from_date"))
-		standard_cost = (actual_seconds / 3600) * hourly_rate if hourly_rate else 0
-		cost = standard_cost + overtime_cost
+		cost_entry = project_cost_map.get((employee, project), {})
+		cost = flt(cost_entry.get("cost") or 0, 2)
+		emp_name = rows[0].employee_name if rows else cost_entry.get("employee_name", "")
 
 		result.append(
 			{
 				"employee": employee,
 				"employee_name": emp_name,
-				"project": project if project != _("Unassigned") else None,
+				"project": project if project != UNASSIGNED_LABEL else None,
 				"total_hours": flt(total_seconds / 3600, 2),
 				"overtime_hours": flt(overtime_seconds / 3600, 2),
 				"overtime_cost": flt(overtime_cost, 2),
 				"actual_hours": flt(actual_seconds / 3600, 2),
-				"hourly_rate": hourly_rate,
 				"cost": cost,
 			}
 		)
@@ -136,24 +133,10 @@ def compute_overtime_seconds(rows, filters):
 	return ot_seconds
 
 
-def get_employee_hourly_rate(employee, on_date=None):
-	"""Derive hourly rate from assigned Salary Structure; fall back to Employee.hourly_rate if present."""
-	salary_structure = get_assigned_salary_structure(employee, getdate(on_date) if on_date else None)
-	if salary_structure:
-		rate = flt(frappe.db.get_value("Salary Structure", salary_structure, "hour_rate")) or 0
-		if rate:
-			return rate
-
-	# fallback if column exists on Employee
-	if frappe.db.has_column("Employee", "hourly_rate"):
-		return flt(frappe.db.get_value("Employee", employee, "hourly_rate")) or 0
-	return 0
-
-
 def get_chart(data):
 	if not data:
 		return None
-	labels = [f"{row['employee']} - {row.get('project') or _('Unassigned')}" for row in data][:10]
+	labels = [f"{row['employee']} - {row.get('project') or UNASSIGNED_LABEL}" for row in data][:10]
 	dataset = [row["total_hours"] for row in data][:10]
 	return {
 		"data": {
@@ -206,7 +189,7 @@ def get_overtime_by_employee_project(filters):
 		employee = parent_map.get(r.parent, {}).get("employee") if parent_map.get(r.parent) else None
 		if not employee:
 			continue
-		project = r.project or _("Unassigned")
+		project = r.project or UNASSIGNED_LABEL
 		key = (employee, project)
 		agg.setdefault(key, {"hours": 0, "amount": 0})
 		agg[key]["hours"] += flt(r.overtime_duration or 0)
@@ -216,10 +199,54 @@ def get_overtime_by_employee_project(filters):
 		employee = r.employee
 		if filters.get("employee") and employee != filters.get("employee"):
 			continue
-		project = r.project or _("Unassigned")
+		project = r.project or UNASSIGNED_LABEL
 		key = (employee, project)
 		agg.setdefault(key, {"hours": 0, "amount": 0})
 		agg[key]["hours"] += flt(r.actual_overtime_duration or 0)
 		if r.rate:
 			agg[key]["amount"] += flt(r.actual_overtime_duration or 0) * flt(r.rate) * flt(r.multiplier or 1)
 	return agg
+
+
+def get_project_cost_map(filters: dict) -> dict[tuple[str, str], dict]:
+	from_date = getdate(filters["from_date"])
+	to_date = getdate(filters["to_date"])
+
+	slip_filters = {
+		"docstatus": 1,
+		"start_date": [">=", from_date],
+		"end_date": ["<=", to_date],
+	}
+	if filters.get("employee"):
+		slip_filters["employee"] = filters["employee"]
+	salary_slips = frappe.get_all(
+		"Salary Slip",
+		filters=slip_filters,
+		fields=["employee", "employee_name", "project_costing_json"],
+	)
+
+	cost_map: dict[tuple[str, str], dict] = {}
+	if not salary_slips:
+		return cost_map
+
+	for slip in salary_slips:
+		if not slip.project_costing_json:
+			continue
+
+		project_rows = frappe.parse_json(slip.project_costing_json) or []
+		for row in project_rows:
+			project_name = row.get("project_name") or UNASSIGNED_LABEL
+			if filters.get("project") and filters["project"] != row.get("project_name"):
+				continue
+
+			key = (slip.employee, project_name)
+			entry = cost_map.setdefault(
+				key,
+				{
+					"cost": 0,
+					"employee_name": row.get("employee_name") or slip.employee_name or "",
+				},
+			)
+			entry["cost"] += flt(row.get("cost") or 0)
+
+	return cost_map

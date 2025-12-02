@@ -383,36 +383,49 @@ def get_existing_half_day_attendance(employee, attendance_date):
 	return None
 
 
-def calculate_working_hours(logs, check_in_out_type, working_hours_calc_type):
+def calculate_working_hours(logs, check_in_out_type, working_hours_calc_type, flexible_pairing=False):
 	"""Given a set of logs in chronological order calculates the total working hours based on the parameters.
 	Zero is returned for all invalid cases.
 
 	:param logs: The List of 'Employee Checkin'.
 	:param check_in_out_type: One of: 'Alternating entries as IN and OUT during the same shift', 'Strictly based on Log Type in Employee Checkin'
 	:param working_hours_calc_type: One of: 'First Check-in and Last Check-out', 'Every Valid Check-in and Check-out'
+	:param flexible_pairing: When True, allow IN/OUT pairing across days by ignoring unmatched OUT logs that precede the first IN.
 	"""
 	total_hours = 0
 	in_time = out_time = None
+	logs_to_use = list(logs)
+
+	if not logs_to_use:
+		return total_hours, in_time, out_time
+
+	if flexible_pairing and check_in_out_type == "Strictly based on Log Type in Employee Checkin":
+		logs_to_use = _prepare_logs_for_flexible_pairing(logs_to_use)
+		if not logs_to_use:
+			return total_hours, in_time, out_time
+
 	if check_in_out_type == "Alternating entries as IN and OUT during the same shift":
-		in_time = logs[0].time
-		if len(logs) >= 2:
-			out_time = logs[-1].time
+		in_time = logs_to_use[0].time
+		if len(logs_to_use) >= 2:
+			out_time = logs_to_use[-1].time
 		if working_hours_calc_type == "First Check-in and Last Check-out":
 			# assumption in this case: First log always taken as IN, Last log always taken as OUT
-			total_hours = time_diff_in_hours(in_time, logs[-1].time)
+			total_hours = time_diff_in_hours(in_time, logs_to_use[-1].time)
 		elif working_hours_calc_type == "Every Valid Check-in and Check-out":
-			logs = logs[:]
-			while len(logs) >= 2:
-				total_hours += time_diff_in_hours(logs[0].time, logs[1].time)
-				del logs[:2]
+			temp_logs = logs_to_use[:]
+			while len(temp_logs) >= 2:
+				total_hours += time_diff_in_hours(temp_logs[0].time, temp_logs[1].time)
+				del temp_logs[:2]
 
 	elif check_in_out_type == "Strictly based on Log Type in Employee Checkin":
 		if working_hours_calc_type == "First Check-in and Last Check-out":
-			first_in_log_index = find_index_in_dict(logs, "log_type", "IN")
-			first_in_log = logs[first_in_log_index] if first_in_log_index or first_in_log_index == 0 else None
-			last_out_log_index = find_index_in_dict(reversed(logs), "log_type", "OUT")
+			first_in_log_index = find_index_in_dict(logs_to_use, "log_type", "IN")
+			first_in_log = (
+				logs_to_use[first_in_log_index] if first_in_log_index or first_in_log_index == 0 else None
+			)
+			last_out_log_index = find_index_in_dict(reversed(logs_to_use), "log_type", "OUT")
 			last_out_log = (
-				logs[len(logs) - 1 - last_out_log_index]
+				logs_to_use[len(logs_to_use) - 1 - last_out_log_index]
 				if last_out_log_index or last_out_log_index == 0
 				else None
 			)
@@ -422,7 +435,7 @@ def calculate_working_hours(logs, check_in_out_type, working_hours_calc_type):
 				total_hours = time_diff_in_hours(in_time, out_time)
 		elif working_hours_calc_type == "Every Valid Check-in and Check-out":
 			in_log = out_log = None
-			for log in logs:
+			for log in logs_to_use:
 				if in_log and out_log:
 					if not in_time:
 						in_time = in_log.time
@@ -449,6 +462,30 @@ def time_diff_in_hours(start, end):
 
 def find_index_in_dict(dict_list, key, value):
 	return next((index for (index, d) in enumerate(dict_list) if d[key] == value), None)
+
+
+def _prepare_logs_for_flexible_pairing(logs):
+	filtered_logs = []
+	open_in_log = None
+
+	for log in logs:
+		log_type = getattr(log, "log_type", None)
+		if log_type == "IN":
+			if open_in_log and filtered_logs and filtered_logs[-1] is open_in_log:
+				filtered_logs.pop()
+			filtered_logs.append(log)
+			open_in_log = log
+		elif log_type == "OUT":
+			if open_in_log and getattr(log, "time", None) and log.time >= open_in_log.time:
+				filtered_logs.append(log)
+				open_in_log = None
+		else:
+			filtered_logs.append(log)
+
+	if open_in_log and filtered_logs and filtered_logs[-1] is open_in_log:
+		filtered_logs.pop()
+
+	return filtered_logs
 
 
 def handle_attendance_exception(log_names: list, error_message: str):
