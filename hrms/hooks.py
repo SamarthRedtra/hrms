@@ -13,7 +13,7 @@ add_to_apps_screen = [
 	{
 		"name": "hrms",
 		"logo": "/assets/hrms/images/frappe-hr-logo.svg",
-		"title": "Frappe HR",
+		"title": "Redtra HR",
 		"route": "/app/overview",
 		"has_permission": "hrms.hr.utils.check_app_permission",
 	}
