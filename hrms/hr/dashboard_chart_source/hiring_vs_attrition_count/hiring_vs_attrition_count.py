@@ -59,20 +59,22 @@ def get_data(
 
 
 def get_records(from_date: str, to_date: str, datefield: str, company: str) -> tuple[tuple[str, float, int]]:
-	filters = [
-		["Employee", "company", "=", company],
-		["Employee", datefield, ">=", from_date, False],
-		["Employee", datefield, "<=", to_date, False],
-	]
-
-	data = frappe.db.get_list(
-		"Employee",
-		fields=[f"{datefield} as _unit", "SUM(1)", "COUNT(*)"],
-		filters=filters,
-		group_by="_unit",
-		order_by="_unit asc",
-		as_list=True,
-		ignore_ifnull=True,
+	from frappe.query_builder.functions import Count
+	
+	Employee = frappe.qb.DocType("Employee")
+	date_field = getattr(Employee, datefield)
+	
+	query = (
+		frappe.qb.from_(Employee)
+		.select(date_field.as_("_unit"), Count("*").as_("count"))
+		.where(Employee.company == company)
+		.where(date_field >= from_date)
+		.where(date_field <= to_date)
+		.where(date_field.isnotnull())
+		.groupby(date_field)
+		.orderby(date_field)
 	)
-
-	return data
+	
+	data = query.run(as_list=True)
+	# Return in format expected by get_result: (date, count, count)
+	return [(row[0], row[1], row[1]) for row in data] if data else []

@@ -380,29 +380,95 @@ frappe.ui.form.on("Bulk Employee Chekin", {
         const dialog = new frappe.ui.Dialog({
             title: __("Add Checkin for {0} employee(s)", [selected_employees.length]),
             fields: [
+                {
+                    fieldname: "checkin_mode",
+                    fieldtype: "Select",
+                    label: __("Checkin Mode"),
+                    options: "Single Entry\nIN & OUT Together",
+                    default: "Single Entry",
+                    reqd: 1,
+                    onchange: function() {
+                        const mode = dialog.get_value("checkin_mode");
+                        const is_both = mode === "IN & OUT Together";
+                        
+                        // Show/hide Single Entry section
+                        dialog.set_df_property("single_entry_section", "hidden", is_both);
+                        dialog.set_df_property("log_type", "hidden", is_both);
+                        dialog.set_df_property("log_type", "reqd", !is_both);
+                        dialog.set_df_property("time", "hidden", is_both);
+                        dialog.set_df_property("time", "reqd", !is_both);
+                        
+                        // Show/hide IN & OUT section
+                        dialog.set_df_property("in_out_section", "hidden", !is_both);
+                        dialog.set_df_property("in_time", "hidden", !is_both);
+                        dialog.set_df_property("in_time", "reqd", is_both);
+                        dialog.set_df_property("out_time", "hidden", !is_both);
+                        dialog.set_df_property("out_time", "reqd", is_both);
+                        
+                        dialog.refresh();
+                    }
+                },
+                { fieldname: "single_entry_section", fieldtype: "Section Break", label: __("Single Entry") },
                 { fieldname: "log_type", fieldtype: "Select", label: __("Log Type"), options: "\nIN\nOUT", reqd: 1 },
                 { fieldname: "time", fieldtype: "Datetime", label: __("Time"), reqd: 1 },
+                { fieldname: "in_out_section", fieldtype: "Section Break", label: __("IN & OUT Times"), hidden: 1 },
+                { fieldname: "in_time", fieldtype: "Datetime", label: __("IN Time"), hidden: 1 },
+                { fieldtype: "Column Break" },
+                { fieldname: "out_time", fieldtype: "Datetime", label: __("OUT Time"), hidden: 1 },
+                { fieldtype: "Section Break", label: __("Other Details") },
                 { fieldname: "device_id", fieldtype: "Data", label: __("Location / Device ID") },
+                { fieldtype: "Column Break" },
                 { fieldname: "project", fieldtype: "Link", label: __("Project"), options: "Project", reqd: project_required ? 1 : 0 },
+                { fieldtype: "Section Break" },
                 { fieldname: "skip_auto_attendance", fieldtype: "Check", label: __("Skip Auto Attendance") },
             ],
             primary_action_label: __("Create"),
             primary_action(values) {
-                dialog.hide();
-                frm.call({
-                    method: "bulk_create_checkins",
-                    doc: frm.doc,
-                    args: {
-                        employees: selected_employees,
-                        log_type: values.log_type,
-                        time: values.time,
-                        device_id: values.device_id,
-                        project: values.project,
-                        skip_auto_attendance: values.skip_auto_attendance ? 1 : 0,
-                    },
-                    freeze: true,
-                    freeze_message: __("Creating Checkins"),
-                });
+                const mode = values.checkin_mode;
+                
+                if (mode === "IN & OUT Together") {
+                    if (!values.in_time || !values.out_time) {
+                        frappe.msgprint(__("Please enter both IN and OUT times."));
+                        return;
+                    }
+                    
+                    dialog.hide();
+                    frm.call({
+                        method: "bulk_create_in_out_checkins",
+                        doc: frm.doc,
+                        args: {
+                            employees: selected_employees,
+                            in_time: values.in_time,
+                            out_time: values.out_time,
+                            device_id: values.device_id,
+                            project: values.project,
+                            skip_auto_attendance: values.skip_auto_attendance ? 1 : 0,
+                        },
+                        freeze: true,
+                        freeze_message: __("Creating IN & OUT Checkins"),
+                    });
+                } else {
+                    if (!values.log_type || !values.time) {
+                        frappe.msgprint(__("Please select log type and time."));
+                        return;
+                    }
+                    
+                    dialog.hide();
+                    frm.call({
+                        method: "bulk_create_checkins",
+                        doc: frm.doc,
+                        args: {
+                            employees: selected_employees,
+                            log_type: values.log_type,
+                            time: values.time,
+                            device_id: values.device_id,
+                            project: values.project,
+                            skip_auto_attendance: values.skip_auto_attendance ? 1 : 0,
+                        },
+                        freeze: true,
+                        freeze_message: __("Creating Checkins"),
+                    });
+                }
             },
         });
 
@@ -411,8 +477,10 @@ frappe.ui.form.on("Bulk Employee Chekin", {
         const today = frappe?.datetime?.now_datetime ? frappe.datetime.now_datetime() : null;
         if (frm.doc.date && nowTime) {
             dialog.set_value("time", `${frm.doc.date} ${nowTime}`);
+            dialog.set_value("in_time", `${frm.doc.date} ${nowTime}`);
         } else if (today) {
             dialog.set_value("time", today);
+            dialog.set_value("in_time", today);
         }
         dialog.show();
     },

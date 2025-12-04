@@ -5,7 +5,7 @@
  "doctype": "Number Card",
  "document_type": "Job Offer",
  "dynamic_filters_json": "[[\"Job Offer\",\"company\",\"=\",\"frappe.defaults.get_user_default(\\\"Company\\\")\"]]",
- "filters_json": "[[\"Job Offer\",\"offer_date\",\"Timespan\",\"this month\",false]]",
+ "filters_json": "[[\"Job Offer\",\"offer_date\",\"Timespan\",\"this month\"]]",
  "function": "Count",
  "idx": 0,
  "is_public": 1,

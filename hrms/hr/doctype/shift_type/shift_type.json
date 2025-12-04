@@ -14,6 +14,7 @@
   "holiday_list",
   "color",
   "enable_auto_attendance",
+  "enable_rotate_holiday",
   "auto_attendance_settings_section",
   "determine_check_in_and_check_out",
   "enable_flexible_log_pairing",
@@ -222,10 +223,16 @@
    "fieldname": "location_radius_check",
    "fieldtype": "Check",
    "label": "Location Radius Check"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_rotate_holiday",
+   "fieldtype": "Check",
+   "label": "Enable Rotate Holiday"
   }
  ],
  "links": [],
- "modified": "2025-10-16 23:47:56.543391",
+ "modified": "2025-12-05 00:36:53.017282",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "Shift Type",

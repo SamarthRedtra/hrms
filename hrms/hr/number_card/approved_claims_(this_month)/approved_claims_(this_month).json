@@ -6,7 +6,7 @@
  "doctype": "Number Card",
  "document_type": "Expense Claim",
  "dynamic_filters_json": "[]",
- "filters_json": "[[\"Expense Claim\",\"approval_status\",\"=\",\"Approved\",false],[\"Expense Claim\",\"posting_date\",\"Timespan\",\"this month\",false],[\"Expense Claim\",\"docstatus\",\"=\",\"1\",false]]",
+ "filters_json": "[[\"Expense Claim\",\"approval_status\",\"=\",\"Approved\"],[\"Expense Claim\",\"posting_date\",\"Timespan\",\"this month\"],[\"Expense Claim\",\"docstatus\",\"=\",\"1\"]]",
  "function": "Count",
  "idx": 0,
  "is_public": 1,

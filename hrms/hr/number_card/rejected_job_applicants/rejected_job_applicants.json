@@ -6,7 +6,7 @@
  "doctype": "Number Card",
  "document_type": "Job Applicant",
  "dynamic_filters_json": "[]",
- "filters_json": "[[\"Job Applicant\",\"status\",\"=\",\"Rejected\",false]]",
+ "filters_json": "[[\"Job Applicant\",\"status\",\"=\",\"Rejected\"]]",
  "function": "Count",
  "idx": 0,
  "is_public": 1,

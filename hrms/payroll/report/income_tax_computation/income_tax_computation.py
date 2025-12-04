@@ -412,19 +412,16 @@ class IncomeTaxComputationReport:
 		self.add_column("Other Income")
 
 		for employee in list(self.employees.keys()):
-			other_income = (
-				frappe.get_all(
-					"Employee Other Income",
-					filters={
-						"employee": employee,
-						"payroll_period": self.filters.payroll_period,
-						"company": self.filters.company,
-						"docstatus": 1,
-					},
-					fields="SUM(amount) as total_amount",
-				)[0].total_amount
-				or 0.0
-			)
+			EOI = frappe.qb.DocType("Employee Other Income")
+			result = (
+				frappe.qb.from_(EOI)
+				.select(Sum(EOI.amount).as_("total_amount"))
+				.where(EOI.employee == employee)
+				.where(EOI.payroll_period == self.filters.payroll_period)
+				.where(EOI.company == self.filters.company)
+				.where(EOI.docstatus == 1)
+			).run()
+			other_income = flt(result[0][0]) if result and result[0][0] else 0.0
 
 			self.employees[employee].setdefault("other_income", other_income)
 

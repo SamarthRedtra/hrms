@@ -2595,19 +2595,16 @@ class SalarySlip(TransactionBase):
 		return total_exemption_amount
 
 	def get_income_form_other_sources(self):
-		return (
-			frappe.get_all(
-				"Employee Other Income",
-				filters={
-					"employee": self.employee,
-					"payroll_period": self.payroll_period.name,
-					"company": self.company,
-					"docstatus": 1,
-				},
-				fields="SUM(amount) as total_amount",
-			)[0].total_amount
-			or 0.0
-		)
+		EOI = frappe.qb.DocType("Employee Other Income")
+		result = (
+			frappe.qb.from_(EOI)
+			.select(Sum(EOI.amount).as_("total_amount"))
+			.where(EOI.employee == self.employee)
+			.where(EOI.payroll_period == self.payroll_period.name)
+			.where(EOI.company == self.company)
+			.where(EOI.docstatus == 1)
+		).run()
+		return flt(result[0][0]) if result and result[0][0] else 0.0
 
 	def get_component_totals(self, component_type, depends_on_payment_days=0):
 		total = 0.0
@@ -2752,20 +2749,19 @@ class SalarySlip(TransactionBase):
 		year_to_date = 0
 		period_start_date, period_end_date = self.get_year_to_date_period()
 
-		salary_slip_sum = frappe.get_list(
-			"Salary Slip",
-			fields=["sum(net_pay) as net_sum", "sum(gross_pay) as gross_sum"],
-			filters={
-				"employee": self.employee,
-				"start_date": [">=", period_start_date],
-				"end_date": ["<", period_end_date],
-				"name": ["!=", self.name],
-				"docstatus": 1,
-			},
-		)
+		SS = frappe.qb.DocType("Salary Slip")
+		result = (
+			frappe.qb.from_(SS)
+			.select(Sum(SS.net_pay).as_("net_sum"), Sum(SS.gross_pay).as_("gross_sum"))
+			.where(SS.employee == self.employee)
+			.where(SS.start_date >= period_start_date)
+			.where(SS.end_date < period_end_date)
+			.where(SS.name != self.name)
+			.where(SS.docstatus == 1)
+		).run()
 
-		year_to_date = flt(salary_slip_sum[0].net_sum) if salary_slip_sum else 0.0
-		gross_year_to_date = flt(salary_slip_sum[0].gross_sum) if salary_slip_sum else 0.0
+		year_to_date = flt(result[0][0]) if result and result[0][0] else 0.0
+		gross_year_to_date = flt(result[0][1]) if result and result[0][1] else 0.0
 
 		year_to_date += self.net_pay
 		gross_year_to_date += self.gross_pay
@@ -2775,19 +2771,19 @@ class SalarySlip(TransactionBase):
 	def compute_month_to_date(self):
 		month_to_date = 0
 		first_day_of_the_month = get_first_day(self.start_date)
-		salary_slip_sum = frappe.get_list(
-			"Salary Slip",
-			fields=["sum(net_pay) as sum"],
-			filters={
-				"employee": self.employee,
-				"start_date": [">=", first_day_of_the_month],
-				"end_date": ["<", self.start_date],
-				"name": ["!=", self.name],
-				"docstatus": 1,
-			},
-		)
+		
+		SS = frappe.qb.DocType("Salary Slip")
+		result = (
+			frappe.qb.from_(SS)
+			.select(Sum(SS.net_pay).as_("sum"))
+			.where(SS.employee == self.employee)
+			.where(SS.start_date >= first_day_of_the_month)
+			.where(SS.end_date < self.start_date)
+			.where(SS.name != self.name)
+			.where(SS.docstatus == 1)
+		).run()
 
-		month_to_date = flt(salary_slip_sum[0].sum) if salary_slip_sum else 0.0
+		month_to_date = flt(result[0][0]) if result and result[0][0] else 0.0
 
 		month_to_date += self.net_pay
 		self.month_to_date = month_to_date

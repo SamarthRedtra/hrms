@@ -187,3 +187,146 @@ class BulkEmployeeChekin(Document):
 			doctype="Bulk Employee Checkin",
 			after_commit=True,
 		)
+
+	@frappe.whitelist()
+	def bulk_create_in_out_checkins(
+		self,
+		employees: list,
+		in_time: str,
+		out_time: str,
+		device_id: str | None = None,
+		latitude: float | None = None,
+		longitude: float | None = None,
+		skip_auto_attendance: int | None = None,
+		project: str | None = None,
+	) -> None:
+		"""Creates both IN and OUT checkin entries for multiple employees at once."""
+		from hrms.hr.utils import validate_bulk_tool_fields
+
+		validate_bulk_tool_fields(self, ["company"], employees)
+
+		if not in_time or not out_time:
+			frappe.throw(_("Both IN time and OUT time are required."))
+
+		in_datetime = get_datetime(in_time)
+		out_datetime = get_datetime(out_time)
+
+		if out_datetime <= in_datetime:
+			frappe.throw(_("OUT time must be after IN time."))
+
+		# For large batches, queue
+		if len(employees) > 30:
+			frappe.enqueue(
+				self._bulk_create_in_out_checkins,
+				timeout=3000,
+				employees=employees,
+				in_time=in_time,
+				out_time=out_time,
+				device_id=device_id,
+				latitude=latitude,
+				longitude=longitude,
+				skip_auto_attendance=skip_auto_attendance,
+				project=project,
+			)
+			frappe.msgprint(
+				_("Creation of IN & OUT Checkins has been queued. It may take a few minutes."),
+				alert=True,
+				indicator="blue",
+			)
+			return
+
+		self._bulk_create_in_out_checkins(
+			employees,
+			in_time=in_time,
+			out_time=out_time,
+			device_id=device_id,
+			latitude=latitude,
+			longitude=longitude,
+			skip_auto_attendance=skip_auto_attendance,
+			project=project,
+		)
+
+	def _bulk_create_in_out_checkins(
+		self,
+		employees: list,
+		in_time: str,
+		out_time: str,
+		device_id: str | None = None,
+		latitude: float | None = None,
+		longitude: float | None = None,
+		skip_auto_attendance: int | None = None,
+		project: str | None = None,
+	) -> None:
+		"""Internal method to create both IN and OUT checkins for employees."""
+		success, failure = [], []
+		count = 0
+		savepoint = "before_in_out_checkin_insert"
+		project_required = frappe.db.get_single_value("Payroll Settings", "project_mandatory_for_checkin")
+
+		in_datetime = get_datetime(in_time)
+		out_datetime = get_datetime(out_time)
+
+		for employee in employees:
+			emp_id = employee if isinstance(employee, str) else employee.get("employee")
+
+			if project_required and not (project or getattr(self, "project", None)):
+				failure.append(emp_id)
+				continue
+
+			try:
+				frappe.db.savepoint(savepoint)
+
+				# Create IN checkin
+				in_doc = frappe.new_doc("Employee Checkin")
+				in_doc.employee = emp_id
+				in_doc.time = in_datetime
+				in_doc.device_id = device_id or getattr(self, "device_id", None)
+				in_doc.log_type = "IN"
+				in_doc.project = project or getattr(self, "project", None)
+				in_doc.latitude = latitude if latitude is not None else getattr(self, "latitude", None)
+				in_doc.longitude = longitude if longitude is not None else getattr(self, "longitude", None)
+				if frappe.utils.cint(skip_auto_attendance if skip_auto_attendance is not None else getattr(self, "skip_auto_attendance", 0)) == 1:
+					in_doc.skip_auto_attendance = 1
+				in_doc.insert()
+
+				# Create OUT checkin
+				out_doc = frappe.new_doc("Employee Checkin")
+				out_doc.employee = emp_id
+				out_doc.time = out_datetime
+				out_doc.device_id = device_id or getattr(self, "device_id", None)
+				out_doc.log_type = "OUT"
+				out_doc.project = project or getattr(self, "project", None)
+				out_doc.latitude = latitude if latitude is not None else getattr(self, "latitude", None)
+				out_doc.longitude = longitude if longitude is not None else getattr(self, "longitude", None)
+				if frappe.utils.cint(skip_auto_attendance if skip_auto_attendance is not None else getattr(self, "skip_auto_attendance", 0)) == 1:
+					out_doc.skip_auto_attendance = 1
+				out_doc.insert()
+
+			except Exception:
+				frappe.db.rollback(save_point=savepoint)
+				frappe.log_error(
+					f"Bulk IN/OUT Checkin failed for employee {emp_id}.",
+					reference_doctype="Employee Checkin",
+				)
+				failure.append(emp_id)
+			else:
+				success.append(
+					{
+						"doc": f"{get_link_to_form('Employee Checkin', in_doc.name)} / {get_link_to_form('Employee Checkin', out_doc.name)}",
+						"employee": emp_id,
+					}
+				)
+
+			count += 1
+			frappe.publish_progress(count * 100 / len(employees), title=_("Creating IN & OUT Checkins..."))
+
+		# Show desktop notification with summary
+		notify_bulk_action_status("Employee Checkin", failure, [d["employee"] for d in success])
+
+		# Realtime event for client to consume
+		frappe.publish_realtime(
+			"completed_bulk_employee_checkin",
+			message={"success": success, "failure": failure},
+			doctype="Bulk Employee Checkin",
+			after_commit=True,
+		)

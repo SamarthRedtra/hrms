@@ -7,7 +7,7 @@
  "doctype": "Dashboard Chart",
  "document_type": "Employee",
  "dynamic_filters_json": "[[\"Employee\",\"company\",\"=\",\"frappe.defaults.get_user_default(\\\"Company\\\")\"]]",
- "filters_json": "[[\"Employee\",\"status\",\"=\",\"Active\",false]]",
+ "filters_json": "[[\"Employee\",\"status\",\"=\",\"Active\"]]",
  "group_by_based_on": "employment_type",
  "group_by_type": "Count",
  "idx": 0,

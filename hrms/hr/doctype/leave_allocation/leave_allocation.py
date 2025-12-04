@@ -117,21 +117,22 @@ class LeaveAllocation(Document):
 			self.db_update()
 
 	def get_existing_leave_count(self):
-		ledger_entries = frappe.get_all(
-			"Leave Ledger Entry",
-			filters={
-				"transaction_type": "Leave Allocation",
-				"transaction_name": self.name,
-				"employee": self.employee,
-				"company": self.company,
-				"leave_type": self.leave_type,
-				"is_carry_forward": 0,
-				"docstatus": 1,
-			},
-			fields=["SUM(leaves) as total_leaves"],
-		)
+		from frappe.query_builder.functions import Sum
+		
+		LLE = frappe.qb.DocType("Leave Ledger Entry")
+		result = (
+			frappe.qb.from_(LLE)
+			.select(Sum(LLE.leaves).as_("total_leaves"))
+			.where(LLE.transaction_type == "Leave Allocation")
+			.where(LLE.transaction_name == self.name)
+			.where(LLE.employee == self.employee)
+			.where(LLE.company == self.company)
+			.where(LLE.leave_type == self.leave_type)
+			.where(LLE.is_carry_forward == 0)
+			.where(LLE.docstatus == 1)
+		).run()
 
-		return ledger_entries[0].total_leaves if ledger_entries else 0
+		return flt(result[0][0]) if result and result[0][0] else 0
 
 	def validate_earned_leave_update(self):
 		if self.leave_policy_assignment and frappe.db.get_value(
@@ -479,18 +480,19 @@ def get_carry_forwarded_leaves(employee, leave_type, date, carry_forward=None):
 
 def get_unused_leaves(employee, leave_type, from_date, to_date):
 	"""Returns unused leaves between the given period while skipping leave allocation expiry"""
-	leaves = frappe.get_all(
-		"Leave Ledger Entry",
-		filters={
-			"employee": employee,
-			"leave_type": leave_type,
-			"from_date": (">=", from_date),
-			"to_date": ("<=", to_date),
-		},
-		or_filters={"is_expired": 0, "is_carry_forward": 1},
-		fields=["sum(leaves) as leaves"],
-	)
-	return flt(leaves[0]["leaves"])
+	from frappe.query_builder.functions import Sum
+	
+	LLE = frappe.qb.DocType("Leave Ledger Entry")
+	result = (
+		frappe.qb.from_(LLE)
+		.select(Sum(LLE.leaves).as_("leaves"))
+		.where(LLE.employee == employee)
+		.where(LLE.leave_type == leave_type)
+		.where(LLE.from_date >= from_date)
+		.where(LLE.to_date <= to_date)
+		.where((LLE.is_expired == 0) | (LLE.is_carry_forward == 1))
+	).run()
+	return flt(result[0][0]) if result and result[0][0] else 0
 
 
 def validate_carry_forward(leave_type):

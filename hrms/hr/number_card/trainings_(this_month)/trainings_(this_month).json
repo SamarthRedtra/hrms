@@ -5,7 +5,7 @@
  "doctype": "Number Card",
  "document_type": "Training Event",
  "dynamic_filters_json": "[[\"Training Event\",\"company\",\"=\",\"frappe.defaults.get_user_default(\\\"Company\\\")\"]]",
- "filters_json": "[[\"Training Event\",\"start_time\",\"Timespan\",\"this month\",false]]",
+ "filters_json": "[[\"Training Event\",\"start_time\",\"Timespan\",\"this month\"]]",
  "function": "Count",
  "idx": 0,
  "is_public": 1,

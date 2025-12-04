@@ -8,7 +8,7 @@
  "doctype": "Dashboard Chart",
  "document_type": "Salary Slip",
  "dynamic_filters_json": "[[\"Salary Slip\",\"company\",\"=\",\"frappe.defaults.get_user_default(\\\"Company\\\")\"]]",
- "filters_json": "[[\"Salary Slip\",\"docstatus\",\"=\",\"1\",false],[\"Salary Slip\",\"start_date\",\"Timespan\",\"last month\",false]]",
+ "filters_json": "[[\"Salary Slip\",\"docstatus\",\"=\",\"1\"],[\"Salary Slip\",\"start_date\",\"Timespan\",\"last month\"]]",
  "group_by_based_on": "department",
  "group_by_type": "Sum",
  "idx": 0,

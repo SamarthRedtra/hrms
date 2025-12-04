@@ -42,7 +42,8 @@ def get_columns():
 
 def get_data(filters: dict):
 	from_date = get_datetime(filters["from_date"])
-	to_date = get_datetime(filters["to_date"]) + datetime.timedelta(days=1)
+	# Extend to_date by 1 extra day to capture OUT punches for night shifts
+	to_date = get_datetime(filters["to_date"]) + datetime.timedelta(days=2)
 
 	checkin_filters = {
 		"time": ["between", [from_date, to_date]],
@@ -56,7 +57,7 @@ def get_data(filters: dict):
 		"Employee Checkin",
 		fields=["employee", "employee_name", "project", "time", "log_type"],
 		filters=checkin_filters,
-		order_by="employee asc, project asc, time asc",
+		order_by="employee asc, time asc",
 	)
 	if not checkins:
 		checkins = []
@@ -64,11 +65,39 @@ def get_data(filters: dict):
 	ot_map = get_overtime_by_employee_project(filters)
 	project_cost_map = get_project_cost_map(filters)
 
-	# group by employee and project
-	grouped: dict[tuple[str, str], list] = defaultdict(list)
+	# Group by employee first, then pair IN/OUT and aggregate by project
+	employee_logs = defaultdict(list)
 	for row in checkins:
-		key = (row.employee, row.project or UNASSIGNED_LABEL)
-		grouped[key].append(row)
+		employee_logs[row.employee].append(row)
+
+	# Process each employee's logs to pair IN/OUT across days
+	grouped: dict[tuple[str, str], dict] = defaultdict(lambda: {"seconds": 0, "employee_name": ""})
+	
+	filter_start = getdate(filters["from_date"])
+	filter_end = getdate(filters["to_date"])
+	
+	for employee, logs in employee_logs.items():
+		# Sort by time
+		sorted_logs = sorted(logs, key=lambda x: x.time)
+		
+		# Pair IN with next OUT (handles cross-day scenarios)
+		open_in = None
+		for log in sorted_logs:
+			if log.log_type == "IN":
+				open_in = log
+			elif log.log_type == "OUT" and open_in:
+				# Calculate duration
+				diff = (log.time - open_in.time).total_seconds()
+				if diff > 0:
+					# Use IN's date to determine if this pair falls within filter range
+					in_date = getdate(open_in.time)
+					if filter_start <= in_date <= filter_end:
+						# Use IN's project (or OUT's if IN has none)
+						project = open_in.project or log.project or UNASSIGNED_LABEL
+						key = (employee, project)
+						grouped[key]["seconds"] += diff
+						grouped[key]["employee_name"] = open_in.employee_name or log.employee_name
+				open_in = None
 
 	all_keys = set(grouped.keys())
 	all_keys.update(ot_map.keys())
@@ -76,8 +105,8 @@ def get_data(filters: dict):
 
 	result = []
 	for employee, project in all_keys:
-		rows = grouped.get((employee, project), [])
-		total_seconds = compute_total_seconds(rows) if rows else 0
+		entry = grouped.get((employee, project), {"seconds": 0, "employee_name": ""})
+		total_seconds = entry["seconds"]
 		ot_meta = ot_map.get((employee, project), DEFAULT_OT_META)
 		overtime_seconds = (ot_meta.get("hours") or 0) * 3600
 		overtime_cost = ot_meta.get("amount") or 0
@@ -85,7 +114,7 @@ def get_data(filters: dict):
 		actual_seconds = max(total_seconds - overtime_seconds, 0)
 		cost_entry = project_cost_map.get((employee, project), {})
 		cost = flt(cost_entry.get("cost") or 0, 2)
-		emp_name = rows[0].employee_name if rows else cost_entry.get("employee_name", "")
+		emp_name = entry["employee_name"] or cost_entry.get("employee_name", "")
 
 		result.append(
 			{
@@ -104,10 +133,11 @@ def get_data(filters: dict):
 
 
 def compute_total_seconds(rows):
-	"""Calculate total seconds from IN/OUT pairs in the sorted logs."""
+	"""Calculate total seconds from IN/OUT pairs in the sorted logs (handles cross-day)."""
 	total = 0
 	in_time = None
-	for row in rows:
+	sorted_rows = sorted(rows, key=lambda x: x.time)
+	for row in sorted_rows:
 		if row.log_type == "IN":
 			in_time = row.time
 		elif row.log_type == "OUT" and in_time:

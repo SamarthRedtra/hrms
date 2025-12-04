@@ -7,7 +7,7 @@
  "doctype": "Dashboard Chart",
  "document_type": "Training Event",
  "dynamic_filters_json": "[]",
- "filters_json": "[[\"Training Event\",\"docstatus\",\"=\",\"1\",false]]",
+ "filters_json": "[[\"Training Event\",\"docstatus\",\"=\",\"1\"]]",
  "group_by_based_on": "type",
  "group_by_type": "Count",
  "idx": 0,

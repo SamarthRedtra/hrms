@@ -1165,14 +1165,12 @@ class PayrollEntry(Document):
 		if key in self._holidays_between_dates:
 			return self._holidays_between_dates[key]
 
-		holidays = frappe.db.get_all(
+		holidays_count = frappe.db.count(
 			"Holiday",
 			filters={"parent": holiday_list, "holiday_date": ("between", [start_date, end_date])},
-			fields=["COUNT(*) as holidays_count"],
-		)[0]
+		)
 
-		if holidays:
-			self._holidays_between_dates[key] = holidays.holidays_count
+		self._holidays_between_dates[key] = holidays_count or 0
 
 		return self._holidays_between_dates.get(key) or 0
 

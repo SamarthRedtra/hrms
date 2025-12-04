@@ -19,9 +19,9 @@
   "attendance_date",
   "company",
   "department",
+  "project",
   "attendance_request",
   "half_day_status",
-  "project",
   "details_section",
   "shift",
   "in_time",
@@ -260,6 +260,8 @@
   {
    "fieldname": "project",
    "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Project",
    "options": "Project"
   },

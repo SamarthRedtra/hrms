@@ -7,7 +7,7 @@
  "doctype": "Dashboard Chart",
  "document_type": "Employee Transfer",
  "dynamic_filters_json": "[[\"Employee Transfer\",\"company\",\"=\",\"frappe.defaults.get_user_default(\\\"Company\\\")\"]]",
- "filters_json": "[[\"Employee Transfer\",\"docstatus\",\"=\",\"1\",false]]",
+ "filters_json": "[[\"Employee Transfer\",\"docstatus\",\"=\",\"1\"]]",
  "group_by_type": "Count",
  "idx": 0,
  "is_public": 1,

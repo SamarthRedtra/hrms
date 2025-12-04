@@ -1072,16 +1072,20 @@ def get_leaves_pending_approval_for_period(
 	employee: str, leave_type: str, from_date: datetime.date, to_date: datetime.date
 ) -> float:
 	"""Returns leaves that are pending for approval"""
-	leaves = frappe.get_all(
-		"Leave Application",
-		filters={"employee": employee, "leave_type": leave_type, "status": "Open"},
-		or_filters={
-			"from_date": ["between", (from_date, to_date)],
-			"to_date": ["between", (from_date, to_date)],
-		},
-		fields=["SUM(total_leave_days) as leaves"],
-	)[0]
-	return leaves["leaves"] if leaves["leaves"] else 0.0
+	from frappe.query_builder.functions import Sum
+	
+	LA = frappe.qb.DocType("Leave Application")
+	result = (
+		frappe.qb.from_(LA)
+		.select(Sum(LA.total_leave_days).as_("leaves"))
+		.where(LA.employee == employee)
+		.where(LA.leave_type == leave_type)
+		.where(LA.status == "Open")
+		.where(
+			(LA.from_date.between(from_date, to_date)) | (LA.to_date.between(from_date, to_date))
+		)
+	).run()
+	return flt(result[0][0]) if result and result[0][0] else 0.0
 
 
 def get_remaining_leaves(
