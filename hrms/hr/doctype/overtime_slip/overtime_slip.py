@@ -137,6 +137,7 @@ class OvertimeSlip(Document):
 							"overtime_duration": overtime_duration,
 							"standard_working_hours": record.standard_working_hours,
 							"project": record.get("project"),
+							"shift": record.get("shift"),
 						},
 					)
 
@@ -152,6 +153,7 @@ class OvertimeSlip(Document):
 					"actual_overtime_duration",
 					"standard_working_hours",
 					"project",
+					"shift",
 				],
 				filters={
 					"employee": self.employee,
@@ -252,6 +254,7 @@ class OvertimeSlip(Document):
 				overtime_detail.overtime_duration,
 				overtime_detail.date,
 				holiday_date_map,
+				shift=overtime_detail.get("shift"),
 			)
 
 			salary_component = self.overtime_types[overtime_type]["overtime_salary_component"]
@@ -457,7 +460,7 @@ class OvertimeSlip(Document):
 		)
 
 	def calculate_overtime_amount(
-		self, overtime_type, applicable_hourly_rate, overtime_duration, overtime_date, holiday_date_map
+		self, overtime_type, applicable_hourly_rate, overtime_duration, overtime_date, holiday_date_map, shift=None
 	):
 		"""
 		Calculate total amount for the given overtime detail child item based on its type and date.
@@ -469,24 +472,47 @@ class OvertimeSlip(Document):
 		if applicable_hourly_rate <= 0:
 			return 0.0, {"multiplier": 1, "day_type": "Normal"}
 
-		print("overtime_details", applicable_hourly_rate, overtime_duration, overtime_date)
 		overtime_date_str = cstr(overtime_date)
 		multiplier = overtime_details.get("standard_multiplier", 1)
 		day_type = "Normal"
 
 		holiday_info = holiday_date_map.get(overtime_date_str)
 		if holiday_info:
-			if overtime_details.get("applicable_for_weekend") and holiday_info.weekly_off:
-				print("weekend_multiplier", overtime_details.get("weekend_multiplier", multiplier))
+			# Check for rotate holiday before applying holiday multiplier
+			is_rotate_holiday = self._is_rotate_holiday(shift, overtime_date)
+
+			if is_rotate_holiday:
+				# For rotate holidays, use standard multiplier (1) instead of holiday multiplier
+				multiplier = 1
+				day_type = "Rotate Holiday"
+			elif overtime_details.get("applicable_for_weekend") and holiday_info.weekly_off:
 				multiplier = overtime_details.get("weekend_multiplier", multiplier)
 				day_type = "Weekend"
 			elif overtime_details.get("applicable_for_public_holiday") and not holiday_info.weekly_off:
-				print("public_holiday_multiplier", overtime_details.get("public_holiday_multiplier", multiplier))
 				multiplier = overtime_details.get("public_holiday_multiplier", multiplier)
 				day_type = "Public Holiday"
 
 		amount = overtime_duration * applicable_hourly_rate * multiplier
 		return amount, {"multiplier": multiplier, "day_type": day_type}
+
+	def _is_rotate_holiday(self, shift, overtime_date):
+		"""Check if the date is a rotate holiday for this employee.
+		
+		Returns True if:
+		1. Shift has enable_rotate_holiday enabled
+		2. There's a Rotate Holiday entry for this employee on this date
+		"""
+		if not shift:
+			return False
+
+		# Check if shift has rotate holiday enabled
+		enable_rotate_holiday = frappe.db.get_value("Shift Type", shift, "enable_rotate_holiday")
+		if not enable_rotate_holiday:
+			return False
+
+		# Check if there's a rotate holiday entry for this employee on this date
+		from hrms.hr.doctype.rotate_holiday.rotate_holiday import is_rotate_holiday
+		return is_rotate_holiday(self.employee, overtime_date)
 
 	def get_holiday_map(self):
 		from erpnext.setup.doctype.employee.employee import get_holiday_list_for_employee

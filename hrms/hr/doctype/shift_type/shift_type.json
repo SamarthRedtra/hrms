@@ -226,6 +226,7 @@
   },
   {
    "default": "0",
+   "description": "When enabled, employees with a Rotate Holiday entry will use standard multiplier (1x) instead of holiday multiplier for overtime calculation on that date.",
    "fieldname": "enable_rotate_holiday",
    "fieldtype": "Check",
    "label": "Enable Rotate Holiday"
