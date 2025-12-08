@@ -131,6 +131,7 @@ def mark_employee_attendance(
 	late_entry: int | None = None,
 	early_exit: int | None = None,
 	shift: str | None = None,
+	project: str | None = None,
 	mark_half_day: bool | None = False,
 	half_day_status: str | None = None,
 	half_day_employee_list: list | str | None = None,
@@ -153,6 +154,7 @@ def mark_employee_attendance(
 				late_entry=late_entry,
 				early_exit=early_exit,
 				shift=shift,
+				project=project,
 			)
 		)
 		attendance.insert()
@@ -166,4 +168,4 @@ def mark_employee_attendance(
 				(Attendance.employee == employee) & (Attendance.attendance_date == date)
 			).set(Attendance.half_day_status, half_day_status).set(Attendance.shift, shift).set(
 				Attendance.late_entry, late_entry
-			).set(Attendance.early_exit, early_exit).set(Attendance.modify_half_day_status, 0).run()
+			).set(Attendance.early_exit, early_exit).set(Attendance.project, project).set(Attendance.modify_half_day_status, 0).run()

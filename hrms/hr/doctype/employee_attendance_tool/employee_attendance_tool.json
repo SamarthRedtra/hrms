@@ -7,6 +7,7 @@
  "field_order": [
   "date",
   "shift",
+  "project",
   "column_break_gmhs",
   "late_entry",
   "early_exit",
@@ -105,6 +106,12 @@
    "label": "Shift",
    "mandatory_depends_on": "filter_by_shift",
    "options": "Shift Type"
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "options": "Project"
   },
   {
    "fieldname": "employment_type",

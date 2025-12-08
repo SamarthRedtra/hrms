@@ -75,6 +75,12 @@ frappe.listview_settings["Attendance"] = {
 						fieldname: "shift",
 						options: "Shift Type",
 					},
+					{
+						label: __("Project"),
+						fieldtype: "Link",
+						fieldname: "project",
+						options: "Project",
+					},
 
 					{
 						fieldtype: "Section Break",

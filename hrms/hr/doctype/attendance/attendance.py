@@ -442,6 +442,7 @@ def mark_bulk_attendance(data):
 			"status": data.status,
 			"half_day_status": "Absent" if data.status == "Half Day" else None,
 			"shift": data.shift,
+			"project": data.get("project"),
 		}
 		attendance = frappe.get_doc(doc_dict).insert()
 		attendance.submit()

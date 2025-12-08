@@ -476,43 +476,61 @@ class OvertimeSlip(Document):
 		multiplier = overtime_details.get("standard_multiplier", 1)
 		day_type = "Normal"
 
-		holiday_info = holiday_date_map.get(overtime_date_str)
-		if holiday_info:
-			# Check for rotate holiday before applying holiday multiplier
-			is_rotate_holiday = self._is_rotate_holiday(shift, overtime_date)
-
-			if is_rotate_holiday:
-				# For rotate holidays, use standard multiplier (1) instead of holiday multiplier
-				multiplier = 1
-				day_type = "Rotate Holiday"
-			elif overtime_details.get("applicable_for_weekend") and holiday_info.weekly_off:
-				multiplier = overtime_details.get("weekend_multiplier", multiplier)
-				day_type = "Weekend"
-			elif overtime_details.get("applicable_for_public_holiday") and not holiday_info.weekly_off:
+		# Check rotate holiday logic first (if enabled on shift)
+		rotate_status = self._get_rotate_holiday_status(shift, overtime_date)
+		
+		if rotate_status == "working_day":
+			# Employee has Rotate Holiday entry for this date - treat as normal working day
+			# Standard multiplier applies, even if it's a calendar holiday
+			multiplier = overtime_details.get("standard_multiplier", 1)
+			day_type = "Rotate Working Day"
+		elif rotate_status == "off_day":
+			# Next day has Rotate Holiday entry - this day becomes employee's holiday
+			# Apply holiday multiplier
+			if overtime_details.get("applicable_for_public_holiday"):
 				multiplier = overtime_details.get("public_holiday_multiplier", multiplier)
-				day_type = "Public Holiday"
+			day_type = "Rotate Off Day"
+		else:
+			# Standard flow - check calendar holidays
+			holiday_info = holiday_date_map.get(overtime_date_str)
+			if holiday_info:
+				if overtime_details.get("applicable_for_weekend") and holiday_info.weekly_off:
+					multiplier = overtime_details.get("weekend_multiplier", multiplier)
+					day_type = "Weekend"
+				elif overtime_details.get("applicable_for_public_holiday") and not holiday_info.weekly_off:
+					multiplier = overtime_details.get("public_holiday_multiplier", multiplier)
+					day_type = "Public Holiday"
 
 		amount = overtime_duration * applicable_hourly_rate * multiplier
 		return amount, {"multiplier": multiplier, "day_type": day_type}
 
-	def _is_rotate_holiday(self, shift, overtime_date):
-		"""Check if the date is a rotate holiday for this employee.
+	def _get_rotate_holiday_status(self, shift, overtime_date):
+		"""Get the rotate holiday status for this employee on the given date.
 		
-		Returns True if:
-		1. Shift has enable_rotate_holiday enabled
-		2. There's a Rotate Holiday entry for this employee on this date
+		Returns:
+			- "working_day": Employee has Rotate Holiday entry for this date (working on a holiday)
+			- "off_day": Next day has Rotate Holiday entry (this day is employee's off day)
+			- None: No rotate holiday logic applies
 		"""
 		if not shift:
-			return False
+			return None
 
 		# Check if shift has rotate holiday enabled
 		enable_rotate_holiday = frappe.db.get_value("Shift Type", shift, "enable_rotate_holiday")
 		if not enable_rotate_holiday:
-			return False
+			return None
 
-		# Check if there's a rotate holiday entry for this employee on this date
-		from hrms.hr.doctype.rotate_holiday.rotate_holiday import is_rotate_holiday
-		return is_rotate_holiday(self.employee, overtime_date)
+		from hrms.hr.doctype.rotate_holiday.rotate_holiday import is_rotate_off_day, is_rotate_working_day
+
+		# Check if this date has a Rotate Holiday entry (employee working on this day)
+		if is_rotate_working_day(self.employee, overtime_date):
+			return "working_day"
+
+		# Check if next day has a Rotate Holiday entry (making this day the employee's off day)
+		if is_rotate_off_day(self.employee, overtime_date):
+			return "off_day"
+
+		return None
 
 	def get_holiday_map(self):
 		from erpnext.setup.doctype.employee.employee import get_holiday_list_for_employee
