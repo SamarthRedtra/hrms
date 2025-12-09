@@ -11,6 +11,11 @@ class RotateHoliday(Document):
 	def validate(self):
 		self.set_day_from_date()
 		self.validate_duplicate()
+		self.validate_attendance_records()
+
+	def after_insert(self):
+		"""Create attendance for the off day (previous day) if it doesn't exist."""
+		self.create_off_day_attendance()
 
 	def set_day_from_date(self):
 		"""Set the day of the week from the date."""
@@ -28,6 +33,99 @@ class RotateHoliday(Document):
 					self.employee_name or self.employee, self.date
 				)
 			)
+
+	def validate_attendance_records(self):
+		"""Validate attendance records for rotate holiday.
+		
+		Rules:
+		1. Attendance must exist for the rotate holiday date (employee working that day)
+		2. If both the rotate holiday date AND previous day have Present attendance, block creation
+		"""
+		rotate_date = getdate(self.date)
+		previous_day = add_days(rotate_date, -1)
+
+		# Check attendance for rotate holiday date (e.g., Sunday)
+		rotate_date_attendance = frappe.db.get_value(
+			"Attendance",
+			{"employee": self.employee, "attendance_date": rotate_date, "docstatus": ["!=", 2]},
+			["name", "status"],
+			as_dict=True,
+		)
+
+		if not rotate_date_attendance:
+			frappe.throw(
+				_("Attendance record must exist for {0} on {1} to create Rotate Holiday. Please mark attendance first.").format(
+					self.employee_name or self.employee,
+					frappe.format(rotate_date, {"fieldtype": "Date"})
+				)
+			)
+
+		if rotate_date_attendance.status not in ["Present", "Work From Home", "Half Day"]:
+			frappe.throw(
+				_("Employee {0} must be marked as Present/Work From Home/Half Day on {1} to create Rotate Holiday. Current status: {2}").format(
+					self.employee_name or self.employee,
+					frappe.format(rotate_date, {"fieldtype": "Date"}),
+					rotate_date_attendance.status
+				)
+			)
+
+		# Check attendance for previous day (e.g., Saturday)
+		previous_day_attendance = frappe.db.get_value(
+			"Attendance",
+			{"employee": self.employee, "attendance_date": previous_day, "docstatus": ["!=", 2]},
+			["name", "status"],
+			as_dict=True,
+		)
+
+		# If both days have Present attendance, don't allow rotate holiday
+		if previous_day_attendance and previous_day_attendance.status in ["Present", "Work From Home"]:
+			frappe.throw(
+				_("Cannot create Rotate Holiday: Employee {0} already has '{1}' attendance on both {2} (previous day) and {3}. "
+				  "The previous day should be available for marking as off day.").format(
+					self.employee_name or self.employee,
+					previous_day_attendance.status,
+					frappe.format(previous_day, {"fieldtype": "Date"}),
+					frappe.format(rotate_date, {"fieldtype": "Date"})
+				)
+			)
+
+	def create_off_day_attendance(self):
+		"""Create attendance for the off day (previous day) if it doesn't exist."""
+		previous_day = add_days(getdate(self.date), -1)
+
+		# Check if attendance already exists for previous day
+		existing_attendance = frappe.db.exists(
+			"Attendance",
+			{"employee": self.employee, "attendance_date": previous_day, "docstatus": ["!=", 2]},
+		)
+
+		if existing_attendance:
+			# Attendance exists, no need to create
+			return
+
+		# Get employee's company
+		company = frappe.db.get_value("Employee", self.employee, "company")
+
+		# Create attendance as "On Leave" for the off day (week off)
+		attendance = frappe.get_doc({
+			"doctype": "Attendance",
+			"employee": self.employee,
+			"attendance_date": previous_day,
+			"status": "On Leave",
+			"company": company,
+		})
+		attendance.flags.ignore_validate = True  # Skip validation for auto-created entry
+		attendance.insert(ignore_permissions=True)
+		attendance.submit()
+
+		frappe.msgprint(
+			_("Attendance marked as 'On Leave' (Week Off) for {0} on {1}").format(
+				self.employee_name or self.employee,
+				frappe.format(previous_day, {"fieldtype": "Date"})
+			),
+			alert=True,
+			indicator="green"
+		)
 
 
 def is_rotate_working_day(employee: str, date) -> bool:

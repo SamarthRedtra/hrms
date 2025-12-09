@@ -382,6 +382,7 @@ class OvertimeSlip(Document):
 				"overtime_salary_component",
 				"overtime_calculation_method",
 				"hourly_rate",
+				"gross_percentage",
 			],
 		)
 
@@ -424,6 +425,10 @@ class OvertimeSlip(Document):
 			applicable_hourly_rate = self._calculate_component_based_hourly_rate(
 				overtime_type, standard_working_hours
 			)
+		elif overtime_calculation_method == "Gross Based":
+			applicable_hourly_rate = self._calculate_gross_based_hourly_rate(
+				overtime_type, standard_working_hours
+			)
 		return applicable_hourly_rate
 
 	def _calculate_component_based_hourly_rate(self, overtime_type, standard_working_hours):
@@ -446,6 +451,37 @@ class OvertimeSlip(Document):
 		fixed_payment_days = 30
 		fixed_working_hours_per_day = 8 or standard_working_hours
 		applicable_daily_amount = component_amount / fixed_payment_days if fixed_payment_days else 0
+
+		return applicable_daily_amount / fixed_working_hours_per_day if fixed_working_hours_per_day else 0.0
+
+	def _calculate_gross_based_hourly_rate(self, overtime_type, standard_working_hours):
+		"""
+		Calculate hourly rate based on gross salary and percentage.
+		Formula: (Gross Salary × Percentage) ÷ (30 days) ÷ (8 hours)
+		"""
+		gross_percentage = flt(self.overtime_types[overtime_type].get("gross_percentage", 60))
+
+		if not hasattr(self, "_cached_salary_slip"):
+			salary_structure = get_assigned_salary_structure(self.employee, self.start_date)
+			self._cached_salary_slip = self._make_salary_slip(salary_structure)
+
+		if not hasattr(self, "_cached_salary_slip") or not self._cached_salary_slip:
+			return 0.0
+
+		# Calculate gross salary (sum of all earnings excluding additional salaries)
+		gross_amount = sum(
+			data.amount
+			for data in self._cached_salary_slip.earnings
+			if not data.get("additional_salary", None)
+		)
+
+		# Apply percentage
+		applicable_amount = gross_amount * (gross_percentage / 100)
+
+		# Use fixed baseline of 30 days and 8 working hours per day
+		fixed_payment_days = 30
+		fixed_working_hours_per_day = 8 or standard_working_hours
+		applicable_daily_amount = applicable_amount / fixed_payment_days if fixed_payment_days else 0
 
 		return applicable_daily_amount / fixed_working_hours_per_day if fixed_working_hours_per_day else 0.0
 
@@ -562,6 +598,7 @@ class OvertimeSlip(Document):
 				"overtime_salary_component",
 				"overtime_calculation_method",
 				"hourly_rate",
+				"gross_percentage",
 			],
 			as_dict=True,
 		)
