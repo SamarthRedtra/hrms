@@ -114,7 +114,9 @@ frappe.ui.form.on("Bulk Employee Chekin", {
 
         frm.call({
             method: "get_employees",
-            args: {},
+            args: {
+                advanced_filters: frm.advanced_filters || []
+            },
             doc: frm.doc,
         }).then((r) => frm.events.render_employees_datatable(frm, r.message));
     },
@@ -197,6 +199,7 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                             <th>' + __("In Project") + '</th>\
                             <th>' + __("Out Time") + '</th>\
                             <th>' + __("Out Project") + '</th>\
+                            <th>' + __("Sessions") + '</th>\
                         </tr>\
                     </thead>\
                     <tbody></tbody>\
@@ -205,7 +208,7 @@ frappe.ui.form.on("Bulk Employee Chekin", {
 
             const $tbody = table.find("tbody");
             if (!employees || !employees.length) {
-                const colspan = 8;
+                const colspan = 9;
                 $tbody.append(
                     '<tr><td colspan="' + colspan + '" class="text-muted">' + no_data_message + '</td></tr>'
                 );
@@ -215,6 +218,12 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                     const out_time = row.out_time ? make_route_link("Employee Checkin", row.out_checkin, row.out_time) : "";
                     const in_project = row.in_project ? make_route_link("Project", row.in_project, row.in_project) : "";
                     const out_project = row.out_project ? make_route_link("Project", row.out_project, row.out_project) : "";
+                    const checkin_count = row.checkin_count || 0;
+                    const has_multiple_sessions = row.has_multiple_sessions;
+                    const sessions_display = has_multiple_sessions ?
+                        '<span class="indicator-pill blue">' + checkin_count + ' checkins</span>' :
+                        (checkin_count > 0 ? checkin_count + ' checkins' : 'No checkins');
+
                     const tr = $(
                         '<tr>\
                             <td><input type="checkbox" class="bec-row-checkbox" data-employee="' + frappe.utils.escape_html(row.employee) + '"></td>\
@@ -226,6 +235,7 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                             <td>' + in_project + '</td>\
                             <td>' + out_time + '</td>\
                             <td>' + out_project + '</td>\
+                            <td>' + sessions_display + '</td>\
                         </tr>'
                     );
                     $tbody.append(tr);
@@ -343,6 +353,21 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                     return "";
                 },
             },
+            {
+                name: "checkin_count",
+                id: "checkin_count",
+                content: __("Sessions"),
+                editable: false,
+                focusable: false,
+                formatter: (_, row) => {
+                    const count = row.checkin_count || 0;
+                    const hasMultiple = row.has_multiple_sessions;
+                    if (hasMultiple) {
+                        return `<span class="indicator-pill blue">${count} checkins</span>`;
+                    }
+                    return count > 0 ? `${count} checkins` : "No checkins";
+                },
+            },
         ].map((x) => ({ ...x, dropdown: false, align: "left" }));
     },
 
@@ -384,27 +409,40 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                     fieldname: "checkin_mode",
                     fieldtype: "Select",
                     label: __("Checkin Mode"),
-                    options: "Single Entry\nIN & OUT Together",
+                    options: "Single Entry\nIN & OUT Together\nIN & OUT Twice",
                     default: "Single Entry",
                     reqd: 1,
                     onchange: function() {
                         const mode = dialog.get_value("checkin_mode");
                         const is_both = mode === "IN & OUT Together";
-                        
+                        const is_twice = mode === "IN & OUT Twice";
+
                         // Show/hide Single Entry section
-                        dialog.set_df_property("single_entry_section", "hidden", is_both);
-                        dialog.set_df_property("log_type", "hidden", is_both);
-                        dialog.set_df_property("log_type", "reqd", !is_both);
-                        dialog.set_df_property("time", "hidden", is_both);
-                        dialog.set_df_property("time", "reqd", !is_both);
-                        
+                        dialog.set_df_property("single_entry_section", "hidden", is_both || is_twice);
+                        dialog.set_df_property("log_type", "hidden", is_both || is_twice);
+                        dialog.set_df_property("log_type", "reqd", !is_both && !is_twice);
+                        dialog.set_df_property("time", "hidden", is_both || is_twice);
+                        dialog.set_df_property("time", "reqd", !is_both && !is_twice);
+
                         // Show/hide IN & OUT section
                         dialog.set_df_property("in_out_section", "hidden", !is_both);
                         dialog.set_df_property("in_time", "hidden", !is_both);
                         dialog.set_df_property("in_time", "reqd", is_both);
                         dialog.set_df_property("out_time", "hidden", !is_both);
                         dialog.set_df_property("out_time", "reqd", is_both);
-                        
+
+                        // Show/hide IN & OUT Twice section
+                        dialog.set_df_property("in_out_twice_section", "hidden", !is_twice);
+                        dialog.set_df_property("first_in_time", "hidden", !is_twice);
+                        dialog.set_df_property("first_in_time", "reqd", is_twice);
+                        dialog.set_df_property("first_out_time", "hidden", !is_twice);
+                        dialog.set_df_property("first_out_time", "reqd", is_twice);
+                        dialog.set_df_property("second_session_section", "hidden", !is_twice);
+                        dialog.set_df_property("second_in_time", "hidden", !is_twice);
+                        dialog.set_df_property("second_in_time", "reqd", is_twice);
+                        dialog.set_df_property("second_out_time", "hidden", !is_twice);
+                        dialog.set_df_property("second_out_time", "reqd", is_twice);
+
                         dialog.refresh();
                     }
                 },
@@ -415,6 +453,14 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                 { fieldname: "in_time", fieldtype: "Datetime", label: __("IN Time"), hidden: 1 },
                 { fieldtype: "Column Break" },
                 { fieldname: "out_time", fieldtype: "Datetime", label: __("OUT Time"), hidden: 1 },
+                { fieldname: "in_out_twice_section", fieldtype: "Section Break", label: __("First Session"), hidden: 1 },
+                { fieldname: "first_in_time", fieldtype: "Datetime", label: __("First IN Time"), hidden: 1 },
+                { fieldtype: "Column Break" },
+                { fieldname: "first_out_time", fieldtype: "Datetime", label: __("First OUT Time"), hidden: 1 },
+                { fieldname: "second_session_section", fieldtype: "Section Break", label: __("Second Session"), hidden: 1 },
+                { fieldname: "second_in_time", fieldtype: "Datetime", label: __("Second IN Time"), hidden: 1 },
+                { fieldtype: "Column Break" },
+                { fieldname: "second_out_time", fieldtype: "Datetime", label: __("Second OUT Time"), hidden: 1 },
                 { fieldtype: "Section Break", label: __("Other Details") },
                 { fieldname: "device_id", fieldtype: "Data", label: __("Location / Device ID") },
                 { fieldtype: "Column Break" },
@@ -424,14 +470,42 @@ frappe.ui.form.on("Bulk Employee Chekin", {
             ],
             primary_action_label: __("Create"),
             primary_action(values) {
-                const mode = values.checkin_mode;
-                
-                if (mode === "IN & OUT Together") {
+                try {
+                    const mode = values.checkin_mode;
+
+                    if (mode === "IN & OUT Twice") {
+                        // Check if all required fields exist and have values
+                        const requiredFields = ['first_in_time', 'first_out_time', 'second_in_time', 'second_out_time'];
+                        const missingFields = requiredFields.filter(field => !values[field]);
+
+                        if (missingFields.length > 0) {
+                            frappe.msgprint(__("Please enter all four time fields: First IN, First OUT, Second IN, and Second OUT times. Missing: {0}", [missingFields.join(', ')]));
+                            return;
+                        }
+
+                        dialog.hide();
+                        frm.call({
+                            method: "bulk_create_in_out_checkins_twice",
+                            doc: frm.doc,
+                            args: {
+                                employees: selected_employees,
+                                first_in_time: values.first_in_time,
+                                first_out_time: values.first_out_time,
+                                second_in_time: values.second_in_time,
+                                second_out_time: values.second_out_time,
+                                device_id: values.device_id,
+                                project: values.project,
+                                skip_auto_attendance: values.skip_auto_attendance ? 1 : 0,
+                            },
+                            freeze: true,
+                            freeze_message: __("Creating IN & OUT Checkins (Twice)"),
+                        });
+                    } else if (mode === "IN & OUT Together") {
                     if (!values.in_time || !values.out_time) {
                         frappe.msgprint(__("Please enter both IN and OUT times."));
                         return;
                     }
-                    
+
                     dialog.hide();
                     frm.call({
                         method: "bulk_create_in_out_checkins",
@@ -452,7 +526,7 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                         frappe.msgprint(__("Please select log type and time."));
                         return;
                     }
-                    
+
                     dialog.hide();
                     frm.call({
                         method: "bulk_create_checkins",
@@ -469,6 +543,10 @@ frappe.ui.form.on("Bulk Employee Chekin", {
                         freeze_message: __("Creating Checkins"),
                     });
                 }
+                } catch (error) {
+                    console.error("Error in bulk checkin creation:", error);
+                    frappe.msgprint(__("An error occurred while processing the checkins. Please try again."));
+                }
             },
         });
 
@@ -478,10 +556,41 @@ frappe.ui.form.on("Bulk Employee Chekin", {
         if (frm.doc.date && nowTime) {
             dialog.set_value("time", `${frm.doc.date} ${nowTime}`);
             dialog.set_value("in_time", `${frm.doc.date} ${nowTime}`);
+            dialog.set_value("first_in_time", `${frm.doc.date} ${nowTime}`);
+            dialog.set_value("second_in_time", `${frm.doc.date} ${nowTime}`);
+
+            // Set reasonable default times for second session (2 hours later)
+            const baseTime = moment(`${frm.doc.date} ${nowTime}`);
+            const firstOutTime = baseTime.clone().add(2, 'hours');
+            const secondOutTime = firstOutTime.clone().add(4, 'hours');
+
+            dialog.set_value("first_out_time", firstOutTime.format('YYYY-MM-DD HH:mm:ss'));
+            dialog.set_value("second_out_time", secondOutTime.format('YYYY-MM-DD HH:mm:ss'));
         } else if (today) {
             dialog.set_value("time", today);
             dialog.set_value("in_time", today);
+            dialog.set_value("first_in_time", today);
+            dialog.set_value("second_in_time", today);
+
+            // Set reasonable default times for second session
+            const baseTime = moment(today);
+            const firstOutTime = baseTime.clone().add(2, 'hours');
+            const secondOutTime = firstOutTime.clone().add(4, 'hours');
+
+            dialog.set_value("first_out_time", firstOutTime.format('YYYY-MM-DD HH:mm:ss'));
+            dialog.set_value("second_out_time", secondOutTime.format('YYYY-MM-DD HH:mm:ss'));
         }
         dialog.show();
+
+        // Initialize field visibility for default selection ("Single Entry")
+        dialog.set_df_property("in_out_section", "hidden", true);
+        dialog.set_df_property("in_time", "hidden", true);
+        dialog.set_df_property("out_time", "hidden", true);
+        dialog.set_df_property("in_out_twice_section", "hidden", true);
+        dialog.set_df_property("first_in_time", "hidden", true);
+        dialog.set_df_property("first_out_time", "hidden", true);
+        dialog.set_df_property("second_session_section", "hidden", true);
+        dialog.set_df_property("second_in_time", "hidden", true);
+        dialog.set_df_property("second_out_time", "hidden", true);
     },
 });
