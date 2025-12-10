@@ -441,14 +441,27 @@ class OvertimeSlip(Document):
 		if not components or not hasattr(self, "_cached_salary_slip"):
 			return 0.0
 
-		component_amount = sum(
+		# Check if payroll setting requires 30 days calculation regardless of attendance
+		calculate_based_on_30_days = frappe.db.get_single_value("Payroll Settings", "calculate_overtime_based_on_30_days")
+
+		# Get component amount from salary slip
+		actual_component_amount = sum(
 			data.amount
 			for data in self._cached_salary_slip.earnings
 			if data.salary_component in components and not data.get("additional_salary", None)
 		)
-		# Use fixed baseline of 30 days and 8 working hours per day for overtime additional salary
-		# This ensures hourly rate = monthly component amount / (30 days * 8 hours)
-		fixed_payment_days = 30
+
+		if calculate_based_on_30_days:
+			# Normalize component amount to 30-day equivalent
+			# Formula: (actual_amount ÷ payment_days) × 30
+			actual_payment_days = flt(self._cached_salary_slip.payment_days) or 30
+			component_amount = (actual_component_amount / actual_payment_days) * 30 if actual_payment_days > 0 else actual_component_amount
+			fixed_payment_days = 30
+		else:
+			# Use actual component amount and payment days from salary slip
+			component_amount = actual_component_amount
+			fixed_payment_days = flt(self._cached_salary_slip.payment_days) or 30
+
 		fixed_working_hours_per_day = 8 or standard_working_hours
 		applicable_daily_amount = component_amount / fixed_payment_days if fixed_payment_days else 0
 
@@ -469,17 +482,30 @@ class OvertimeSlip(Document):
 			return 0.0
 
 		# Calculate gross salary (sum of all earnings excluding additional salaries)
-		gross_amount = sum(
+		actual_gross_amount = sum(
 			data.amount
 			for data in self._cached_salary_slip.earnings
 			if not data.get("additional_salary", None)
 		)
 
+		# Check if payroll setting requires 30 days calculation regardless of attendance
+		calculate_based_on_30_days = frappe.db.get_single_value("Payroll Settings", "calculate_overtime_based_on_30_days")
+
+		if calculate_based_on_30_days:
+			# Normalize gross amount to 30-day equivalent
+			# Formula: (actual_gross ÷ payment_days) × 30
+			actual_payment_days = flt(self._cached_salary_slip.payment_days) or 30
+			gross_amount = (actual_gross_amount / actual_payment_days) * 30 if actual_payment_days > 0 else actual_gross_amount
+			fixed_payment_days = 30
+		else:
+			# Use actual gross amount and payment days from salary slip
+			gross_amount = actual_gross_amount
+			fixed_payment_days = flt(self._cached_salary_slip.payment_days) or 30
+
 		# Apply percentage
 		applicable_amount = gross_amount * (gross_percentage / 100)
 
-		# Use fixed baseline of 30 days and 8 working hours per day
-		fixed_payment_days = 30
+		# Use fixed baseline of 8 working hours per day
 		fixed_working_hours_per_day = 8 or standard_working_hours
 		applicable_daily_amount = applicable_amount / fixed_payment_days if fixed_payment_days else 0
 

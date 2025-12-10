@@ -581,16 +581,5 @@ frappe.ui.form.on("Bulk Employee Chekin", {
             dialog.set_value("second_out_time", secondOutTime.format('YYYY-MM-DD HH:mm:ss'));
         }
         dialog.show();
-
-        // Initialize field visibility for default selection ("Single Entry")
-        dialog.set_df_property("in_out_section", "hidden", true);
-        dialog.set_df_property("in_time", "hidden", true);
-        dialog.set_df_property("out_time", "hidden", true);
-        dialog.set_df_property("in_out_twice_section", "hidden", true);
-        dialog.set_df_property("first_in_time", "hidden", true);
-        dialog.set_df_property("first_out_time", "hidden", true);
-        dialog.set_df_property("second_session_section", "hidden", true);
-        dialog.set_df_property("second_in_time", "hidden", true);
-        dialog.set_df_property("second_out_time", "hidden", true);
     },
 });

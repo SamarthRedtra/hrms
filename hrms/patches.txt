@@ -35,3 +35,5 @@ hrms.patches.v15_0.update_advance_payment_ledger_amount #2025-09-23
 hrms.patches.v15_0.call_set_total_advance_paid_on_advance_documents #2025-09-23
 hrms.patches.v15_0.rename_claim_date_to_payroll_date_in_employee_benefit_claim
 hrms.patches.v16_0.fix_dashboard_filter_format
+hrms.patches.v16_0.rebuild_workspace_caches #hh
+hrms.patches.v16_0.add_overtime_30_days_setting
