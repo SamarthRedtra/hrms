@@ -8,7 +8,7 @@ def execute():
 
 	# Check if the field already exists
 	if not frappe.db.has_column("Overtime Type", "treat_holiday_hours_as_full_overtime"):
-		# Add the new field to Overtime Type
+		# Add the new field to Overtime Type table
 		frappe.db.sql("""
 			ALTER TABLE `tabOvertime Type`
 			ADD COLUMN `treat_holiday_hours_as_full_overtime` TINYINT(1) NOT NULL DEFAULT 0
