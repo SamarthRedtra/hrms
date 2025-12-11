@@ -111,6 +111,9 @@ class OvertimeSlip(Document):
 		self.overtime_details = []
 		overtime_type_cache = {}
 
+		# Get holiday map for checking if dates are holidays/weekends
+		holiday_date_map = self.get_holiday_map()
+
 		for record in records:
 			if record.overtime_type not in overtime_type_cache:
 				overtime_type_cache[record.overtime_type] = frappe.db.get_value(
@@ -127,15 +130,44 @@ class OvertimeSlip(Document):
 					else maximum_overtime_hours_allowed
 				)
 
-			if overtime_duration > 0:
+			# Check if this overtime type has "treat_holiday_hours_as_full_overtime" enabled
+			overtime_type_config = frappe.get_cached_value(
+				"Overtime Type",
+				record.overtime_type,
+				["treat_holiday_hours_as_full_overtime", "applicable_for_weekend", "applicable_for_public_holiday"],
+				as_dict=True
+			) or {}
+
+			treat_as_full_overtime = overtime_type_config.get("treat_holiday_hours_as_full_overtime", 0)
+
+			# Check if this date is a holiday/weekend
+			date_key = cstr(record.attendance_date)
+			holiday_info = holiday_date_map.get(date_key)
+			is_holiday_weekend = False
+			if holiday_info:
+				if (overtime_type_config.get("applicable_for_weekend") and holiday_info.weekly_off) or \
+				   (overtime_type_config.get("applicable_for_public_holiday") and not holiday_info.weekly_off):
+					is_holiday_weekend = True
+
+			# If setting enabled and it's a holiday/weekend, modify the stored values
+			final_overtime_duration = overtime_duration
+			final_standard_working_hours = record.standard_working_hours
+
+			if treat_as_full_overtime and is_holiday_weekend and record.standard_working_hours:
+				# Combine standard hours + overtime hours into overtime_duration
+				# Set standard_working_hours to 0 since all hours are now overtime
+				final_overtime_duration = record.standard_working_hours + overtime_duration
+				final_standard_working_hours = 0
+
+			if final_overtime_duration > 0:
 					self.append(
 						"overtime_details",
 						{
 							"reference_document": record.name,
 							"date": record.attendance_date,
 							"overtime_type": record.overtime_type,
-							"overtime_duration": overtime_duration,
-							"standard_working_hours": record.standard_working_hours,
+							"overtime_duration": final_overtime_duration,
+							"standard_working_hours": final_standard_working_hours,
 							"project": record.get("project"),
 							"shift": record.get("shift"),
 						},
@@ -248,26 +280,8 @@ class OvertimeSlip(Document):
 				overtime_type, overtime_detail.get("standard_working_hours")
 			)
 
-			# Check if holiday hours should be treated as full overtime
-			overtime_details_config = self.overtime_types.get(overtime_type, {})
-			treat_as_full_overtime = overtime_details_config.get("treat_holiday_hours_as_full_overtime", 0)
-
-			# Determine if this is a holiday/weekend day
-			date_key = cstr(overtime_detail.date)
-			holiday_info = holiday_date_map.get(date_key)
-			is_holiday_weekend = False
-			if holiday_info:
-				if (overtime_details_config.get("applicable_for_weekend") and holiday_info.weekly_off) or \
-				   (overtime_details_config.get("applicable_for_public_holiday") and not holiday_info.weekly_off):
-					is_holiday_weekend = True
-
-			# If setting enabled and it's a holiday/weekend, use total working hours instead of overtime duration
+			# Use the overtime_duration from the child table (already adjusted for holiday hours setting)
 			actual_overtime_duration = overtime_detail.overtime_duration
-			if treat_as_full_overtime and is_holiday_weekend and overtime_detail.get("standard_working_hours"):
-				# Calculate total working hours = standard hours + overtime hours
-				original_duration = overtime_detail.overtime_duration or 0
-				total_working_hours = overtime_detail.standard_working_hours + original_duration
-				actual_overtime_duration = total_working_hours
 
 			overtime_amount, meta = self.calculate_overtime_amount(
 				overtime_type,
