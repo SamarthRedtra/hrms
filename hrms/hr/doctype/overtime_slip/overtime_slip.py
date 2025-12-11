@@ -519,11 +519,13 @@ class OvertimeSlip(Document):
 			return 0.0
 
 		# Calculate gross salary (sum of all earnings excluding additional salaries)
-		actual_gross_amount = sum(
-			data.amount
-			for data in self._cached_salary_slip.earnings
-			if not data.get("additional_salary", None)
-		)
+		values_amount = frappe.db.get_values("Salary Structure Assignment", salary_structure, ["base","variable"])
+		actual_gross_amount = values_amount[0][0] + values_amount[0][1]
+		# actual_gross_amount = sum(
+		# 	data.amount
+		# 	for data in self._cached_salary_slip.earnings
+		# 	if not data.get("additional_salary", None)
+		# )
 
 		# Check if payroll setting requires 30 days calculation regardless of attendance
 		calculate_based_on_30_days = frappe.db.get_single_value("Payroll Settings", "calculate_overtime_based_on_30_days")
