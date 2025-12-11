@@ -265,7 +265,9 @@ class OvertimeSlip(Document):
 			actual_overtime_duration = overtime_detail.overtime_duration
 			if treat_as_full_overtime and is_holiday_weekend and overtime_detail.get("standard_working_hours"):
 				# Calculate total working hours = standard hours + overtime hours
-				actual_overtime_duration = overtime_detail.standard_working_hours + (overtime_detail.overtime_duration or 0)
+				original_duration = overtime_detail.overtime_duration or 0
+				total_working_hours = overtime_detail.standard_working_hours + original_duration
+				actual_overtime_duration = total_working_hours
 
 			overtime_amount, meta = self.calculate_overtime_amount(
 				overtime_type,
@@ -403,6 +405,7 @@ class OvertimeSlip(Document):
 				"overtime_calculation_method",
 				"hourly_rate",
 				"gross_percentage",
+				"treat_holiday_hours_as_full_overtime",
 			],
 		)
 
@@ -474,7 +477,7 @@ class OvertimeSlip(Document):
 		if calculate_based_on_30_days:
 			# Normalize component amount to 30-day equivalent
 			# Formula: (actual_amount ÷ payment_days) × 30
-			actual_payment_days = flt(self._cached_salary_slip.payment_days) or 30
+			actual_payment_days = 30
 			component_amount = (actual_component_amount / actual_payment_days) * 30 if actual_payment_days > 0 else actual_component_amount
 			fixed_payment_days = 30
 		else:
@@ -514,7 +517,7 @@ class OvertimeSlip(Document):
 		if calculate_based_on_30_days:
 			# Normalize gross amount to 30-day equivalent
 			# Formula: (actual_gross ÷ payment_days) × 30
-			actual_payment_days = flt(self._cached_salary_slip.payment_days) or 30
+			actual_payment_days = 30
 			gross_amount = (actual_gross_amount / actual_payment_days) * 30 if actual_payment_days > 0 else actual_gross_amount
 			fixed_payment_days = 30
 		else:
