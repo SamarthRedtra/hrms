@@ -248,10 +248,29 @@ class OvertimeSlip(Document):
 				overtime_type, overtime_detail.get("standard_working_hours")
 			)
 
+			# Check if holiday hours should be treated as full overtime
+			overtime_details_config = self.overtime_types.get(overtime_type, {})
+			treat_as_full_overtime = overtime_details_config.get("treat_holiday_hours_as_full_overtime", 0)
+
+			# Determine if this is a holiday/weekend day
+			date_key = cstr(overtime_detail.date)
+			holiday_info = holiday_date_map.get(date_key)
+			is_holiday_weekend = False
+			if holiday_info:
+				if (overtime_details_config.get("applicable_for_weekend") and holiday_info.weekly_off) or \
+				   (overtime_details_config.get("applicable_for_public_holiday") and not holiday_info.weekly_off):
+					is_holiday_weekend = True
+
+			# If setting enabled and it's a holiday/weekend, use total working hours instead of overtime duration
+			actual_overtime_duration = overtime_detail.overtime_duration
+			if treat_as_full_overtime and is_holiday_weekend and overtime_detail.get("standard_working_hours"):
+				# Calculate total working hours = standard hours + overtime hours
+				actual_overtime_duration = overtime_detail.standard_working_hours + (overtime_detail.overtime_duration or 0)
+
 			overtime_amount, meta = self.calculate_overtime_amount(
 				overtime_type,
 				applicable_hourly_rate,
-				overtime_detail.overtime_duration,
+				actual_overtime_duration,
 				overtime_detail.date,
 				holiday_date_map,
 				shift=overtime_detail.get("shift"),
@@ -274,7 +293,8 @@ class OvertimeSlip(Document):
 				)
 
 			# accumulate normal vs holiday hours and build calc lines
-			ot_hours = overtime_detail.overtime_duration or 0.0
+			# Use the actual duration that was used for calculation (may be full working hours for holidays)
+			ot_hours = actual_overtime_duration or 0.0
 			if meta.get("day_type") == "Normal":
 				normal_hours_sum += ot_hours
 			else:

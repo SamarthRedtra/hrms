@@ -5,7 +5,7 @@
  "creation": "2024-10-12 23:46:31.408000",
  "doctype": "DocType",
  "engine": "InnoDB",
- "field_order": [
+  "field_order": [
   "section_break_pai1",
   "maximum_overtime_hours_allowed",
   "column_break_meuk",
@@ -22,7 +22,8 @@
   "applicable_for_public_holiday",
   "public_holiday_multiplier",
   "applicable_for_weekend",
-  "weekend_multiplier"
+  "weekend_multiplier",
+  "treat_holiday_hours_as_full_overtime"
  ],
  "fields": [
   {
@@ -83,6 +84,13 @@
    "label": "Weekend Multiplier",
    "mandatory_depends_on": "eval: doc.applicable_for_weekend == 1",
    "non_negative": 1
+  },
+  {
+   "default": "0",
+   "description": "If enabled, all hours worked on weekends and public holidays will be treated as full overtime hours (no standard working hours split). All hours will be multiplied by the respective holiday/weekend multiplier.",
+   "fieldname": "treat_holiday_hours_as_full_overtime",
+   "fieldtype": "Check",
+   "label": "Treat Holiday Hours as Full Overtime"
   },
   {
    "default": "0",
