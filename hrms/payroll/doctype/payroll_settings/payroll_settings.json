@@ -13,6 +13,7 @@
   "consider_marked_attendance_on_holidays",
   "strict_weekoff_leave_holiday_policy",
   "calculate_overtime_based_on_30_days",
+  "use_fixed_30_days_for_payment_days_calculation",
   "column_break_6",
   "max_working_hours_against_timesheet",
   "daily_wages_fraction_for_half_day",
@@ -172,6 +173,13 @@
    "fieldname": "calculate_overtime_based_on_30_days",
    "fieldtype": "Check",
    "label": "Calculate Overtime Based on 30 Days Salary"
+  },
+  {
+   "default": "0",
+   "description": "If enabled, payment days calculations for salary components will use 30 days as the base instead of actual calendar month days",
+   "fieldname": "use_fixed_30_days_for_payment_days_calculation",
+   "fieldtype": "Check",
+   "label": "Use Fixed 30 Days for Payment Days Calculation"
   },
   {
    "depends_on": "eval:doc.email_salary_slip_to_employee",

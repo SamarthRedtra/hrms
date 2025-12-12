@@ -8,7 +8,17 @@ from itertools import groupby
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, cint, create_batch, get_datetime, get_time, getdate, time_diff
+from frappe.utils import (
+	add_days,
+	cint,
+	create_batch,
+	flt,
+	get_datetime,
+	get_time,
+	getdate,
+	time_diff,
+	time_diff_in_hours,
+)
 
 from erpnext.setup.doctype.employee.employee import get_holiday_list_for_employee
 from erpnext.setup.doctype.holiday_list.holiday_list import is_holiday
@@ -134,10 +144,32 @@ class ShiftType(Document):
 				out_time,
 			) = self.get_attendance(single_shift_logs)
 
-			if not self.should_mark_attendance(employee, attendance_date):
+		# If working hours could not be derived (e.g., IN/OUT pairing failed),
+		# fall back to first/last log timestamps to avoid zero-hour attendance.
+			print(working_hours == 0 , single_shift_logs)
+			if working_hours == 0 and single_shift_logs:
+				print("fallback_in")
+				print("fallback_out")
+				fallback_in = getattr(single_shift_logs[0], "time", None)
+				fallback_out = getattr(single_shift_logs[-1], "time", None) if len(single_shift_logs) > 1 else None
+				if fallback_in and fallback_out and fallback_out > fallback_in:
+					in_time = in_time or fallback_in
+					out_time = out_time or fallback_out
+				if working_hours == 0 and in_time and out_time:
+					# Fallback: derive working hours from timestamps when not provided
+					working_hours = flt(time_diff_in_hours(out_time, in_time))
+			if (
+				cint(self.mark_holiday_weekoff_present_if_worked)
+				and flt(working_hours) > 0
+				and is_holiday(self.get_holiday_list(employee), attendance_date)
+				and attendance_status == "Absent"
+			):
+				attendance_status = "Present"
+
+			if not self.should_mark_attendance(employee, attendance_date, working_hours):
 				continue
 
-			mark_attendance_and_link_log(
+			attendance_doc = mark_attendance_and_link_log(
 				single_shift_logs,
 				attendance_status,
 				attendance_date,
@@ -149,6 +181,24 @@ class ShiftType(Document):
 				self.name,
 				overtime_type,
 			)
+
+			# For worked holidays/weekoffs, attach overtime details so OT slips pick them up
+			if (
+				attendance_doc
+				and cint(self.mark_holiday_weekoff_present_if_worked)
+				and working_hours
+				and is_holiday(self.get_holiday_list(employee), attendance_date)
+			):
+				holiday_ot_type = overtime_type or self.overtime_type
+				if holiday_ot_type:
+					attendance_doc.db_set(
+						{
+							"overtime_type": holiday_ot_type,
+							"actual_overtime_duration": working_hours,
+							"standard_working_hours": 0,
+						},
+						update_modified=False,
+					)
 
 		# commit after processing checkin logs to avoid losing progress
 		frappe.db.commit()  # nosemgrep
@@ -350,7 +400,7 @@ class ShiftType(Document):
 		holiday_list_name = self.holiday_list or get_holiday_list_for_employee(employee, False)
 		return holiday_list_name
 
-	def should_mark_attendance(self, employee: str, attendance_date: str) -> bool:
+	def should_mark_attendance(self, employee: str, attendance_date: str, working_hours: float = 0) -> bool:
 		"""Determines whether attendance should be marked on holidays or not"""
 		if self.mark_auto_attendance_on_holidays:
 			# no need to check if date is a holiday or not
@@ -359,6 +409,8 @@ class ShiftType(Document):
 
 		holiday_list = self.get_holiday_list(employee)
 		if is_holiday(holiday_list, attendance_date):
+			if cint(self.mark_holiday_weekoff_present_if_worked) and flt(working_hours) > 0:
+				return True
 			return False
 		return True
 

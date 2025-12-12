@@ -789,9 +789,12 @@ class SalarySlip(TransactionBase):
 				"consider_marked_attendance_on_holidays",
 				"daily_wages_fraction_for_half_day",
 				"consider_unmarked_attendance_as",
+				"use_fixed_30_days_for_payment_days_calculation",
 			),
 			as_dict=1,
 		)
+
+		use_fixed_payment_days = self._should_use_fixed_payment_days(payroll_settings)
 
 		consider_marked_attendance_on_holidays = (
 			payroll_settings.include_holidays_in_total_working_days
@@ -801,9 +804,10 @@ class SalarySlip(TransactionBase):
 		daily_wages_fraction_for_half_day = flt(payroll_settings.daily_wages_fraction_for_half_day) or 0.5
 
 		working_days = date_diff(self.end_date, self.start_date) + 1
+		self._attendance_total_working_days = working_days
 		if for_preview:
-			self.total_working_days = working_days
-			self.payment_days = working_days
+			self.total_working_days = 30 if use_fixed_payment_days else working_days
+			self.payment_days = self.total_working_days
 			return
 
 		holidays = self.get_holidays_for_employee(self.start_date, self.end_date)
@@ -884,9 +888,12 @@ class SalarySlip(TransactionBase):
 			)
 
 		self.leave_without_pay = lwp
-		self.total_working_days = working_days
+		self.total_working_days = 30 if use_fixed_payment_days else working_days
 
-		payment_days = self.get_payment_days(payroll_settings.include_holidays_in_total_working_days)
+		payment_days = self.get_payment_days(
+			payroll_settings.include_holidays_in_total_working_days,
+			force_fixed_30_days=use_fixed_payment_days,
+		)
 
 		# Build pending deductions summary from future Additional Salary deduction components
 		try:
@@ -981,22 +988,27 @@ class SalarySlip(TransactionBase):
 
 			if payroll_settings.payroll_based_on == "Attendance":
 				self.payment_days -= flt(absent)
+				print("payment_days6",self.payment_days)
 
 			consider_unmarked_attendance_as = payroll_settings.consider_unmarked_attendance_as or "Present"
 
 			if payroll_settings.payroll_based_on == "Attendance":
 				if consider_unmarked_attendance_as == "Absent":
+					print("consider_unmarked_attendance_as",consider_unmarked_attendance_as)
 					unmarked_days = self.get_unmarked_days(
 						payroll_settings.include_holidays_in_total_working_days, holidays
 					)
+					print("unmarked_days",unmarked_days)
 					self.absent_days += unmarked_days  # will be treated as absent
 					self.payment_days -= unmarked_days
+					print("payment_days5",self.payment_days)
 				half_absent_days = self.get_half_absent_days(
 					consider_marked_attendance_on_holidays,
 					holidays,
 				)
 				self.absent_days += half_absent_days * daily_wages_fraction_for_half_day
 				self.payment_days -= half_absent_days * daily_wages_fraction_for_half_day
+				print("payment_days7",self.payment_days)
 		else:
 			self.payment_days = 0
 
@@ -1004,8 +1016,11 @@ class SalarySlip(TransactionBase):
 		self, include_holidays_in_total_working_days: bool, holidays: list | None = None
 	) -> float:
 		"""Calculates the number of unmarked days for an employee within a date range"""
+
+		base_working_days = getattr(self, "_attendance_total_working_days", self.total_working_days)
+
 		unmarked_days = (
-			self.total_working_days
+			base_working_days
 			- self._get_days_outside_period(include_holidays_in_total_working_days, holidays)
 			- self._get_marked_attendance_days(holidays)
 		)
@@ -1088,7 +1103,24 @@ class SalarySlip(TransactionBase):
 
 		return query.run()[0][0]
 
-	def get_payment_days(self, include_holidays_in_total_working_days):
+	def _covers_full_month(self) -> bool:
+		start = getdate(self.actual_start_date)
+		end = getdate(self.actual_end_date)
+
+		return (
+			start.year == end.year
+			and start.month == end.month
+			and start == get_first_day(start)
+			and end == get_last_day(start)
+		)
+
+	def _should_use_fixed_payment_days(self, payroll_settings) -> bool:
+		return (
+			cint(payroll_settings.get("use_fixed_30_days_for_payment_days_calculation"))
+			and self._covers_full_month()
+		)
+
+	def get_payment_days(self, include_holidays_in_total_working_days, force_fixed_30_days: bool = False):
 		if self.joining_date and self.joining_date > getdate(self.end_date):
 			# employee joined after payroll date
 			return 0
@@ -1107,6 +1139,9 @@ class SalarySlip(TransactionBase):
 		if not cint(include_holidays_in_total_working_days):
 			holidays = self.get_holidays_for_employee(self.actual_start_date, self.actual_end_date)
 			payment_days -= len(holidays)
+
+		if force_fixed_30_days and self._covers_full_month():
+			payment_days = 30
 
 		return payment_days
 

@@ -211,6 +211,13 @@
    "label": "Allow Overtime"
   },
   {
+   "default": "0",
+   "description": "When enabled, if an employee works any hours on a weekly off/public holiday, auto-attendance will mark the day as Present (instead of skipping it) and downstream calculations (e.g. payroll/OT) can treat it as worked.",
+   "fieldname": "mark_holiday_weekoff_present_if_worked",
+   "fieldtype": "Check",
+   "label": "Mark Holiday/Weekoff as Present If Worked"
+  },
+  {
    "depends_on": "eval:doc.allow_overtime == 1",
    "fieldname": "overtime_type",
    "fieldtype": "Link",

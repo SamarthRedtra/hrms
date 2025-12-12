@@ -97,6 +97,7 @@ class OvertimeSlip(Document):
 	@frappe.whitelist()
 	def get_emp_and_overtime_details(self):
 		records = self.get_attendance_records()
+		print([i.get("attendance_date")for i in records])
 		if len(records):
 			self.create_overtime_details_row_for_attendance(records)
 		if len(self.overtime_details):
@@ -144,7 +145,9 @@ class OvertimeSlip(Document):
 			date_key = cstr(record.attendance_date)
 			holiday_info = holiday_date_map.get(date_key)
 			is_holiday_weekend = False
+			is_any_offday = False
 			if holiday_info:
+				is_any_offday = True
 				if (overtime_type_config.get("applicable_for_weekend") and holiday_info.weekly_off) or \
 				   (overtime_type_config.get("applicable_for_public_holiday") and not holiday_info.weekly_off):
 					is_holiday_weekend = True
@@ -152,26 +155,35 @@ class OvertimeSlip(Document):
 			# If setting enabled and it's a holiday/weekend, modify the stored values
 			final_overtime_duration = overtime_duration
 			final_standard_working_hours = record.standard_working_hours
+			actual_working_hours = flt(record.get("working_hours")) if hasattr(record, "get") else flt(getattr(record, "working_hours", 0))
 
 			if treat_as_full_overtime and is_holiday_weekend and record.standard_working_hours:
 				# Combine standard hours + overtime hours into overtime_duration
 				# Set standard_working_hours to 0 since all hours are now overtime
 				final_overtime_duration = record.standard_working_hours + overtime_duration
 				final_standard_working_hours = 0
+			elif treat_as_full_overtime and is_holiday_weekend and not record.standard_working_hours:
+				# No standard hours recorded; use the actual working hours as full OT
+				final_overtime_duration = actual_working_hours
+				final_standard_working_hours = 0
+			elif (is_holiday_weekend or is_any_offday) and final_overtime_duration <= 0 and actual_working_hours:
+				# Weekend/holiday work but below standard hours: pay for actual hours as OT
+				final_overtime_duration = actual_working_hours
+				final_standard_working_hours = 0
 
 			if final_overtime_duration > 0:
-					self.append(
-						"overtime_details",
-						{
-							"reference_document": record.name,
-							"date": record.attendance_date,
-							"overtime_type": record.overtime_type,
-							"overtime_duration": final_overtime_duration,
-							"standard_working_hours": final_standard_working_hours,
-							"project": record.get("project"),
-							"shift": record.get("shift"),
-						},
-					)
+				self.append(
+					"overtime_details",
+					{
+						"reference_document": record.name,
+						"date": record.attendance_date,
+						"overtime_type": record.overtime_type,
+						"overtime_duration": final_overtime_duration,
+						"standard_working_hours": final_standard_working_hours,
+						"project": record.get("project"),
+						"shift": record.get("shift"),
+					},
+				)
 
 	def get_attendance_records(self):
 		records = []
@@ -184,6 +196,7 @@ class OvertimeSlip(Document):
 					"overtime_type",
 					"actual_overtime_duration",
 					"standard_working_hours",
+					"working_hours",
 					"project",
 					"shift",
 				],
