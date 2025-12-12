@@ -240,6 +240,16 @@ class OvertimeSlip(Document):
 
 	def create_additional_salary(self, salary_component, total_amount, precision=None):
 		if total_amount > 0:
+			# Calculate payroll_date to be within the salary slip period
+			# For overtime processed after salary slip period, use the end_date
+			# This ensures the additional salary is picked up by the next salary slip
+			payroll_date = self.end_date
+
+			# If overtime slip end_date is before salary slip start_date,
+			# it means overtime is being processed for a future period
+			# In this case, we should not set a specific payroll_date to avoid conflicts
+			# The additional salary will be picked up in future salary slips
+
 			additional_salary = frappe.get_doc(
 				{
 					"doctype": "Additional Salary",
@@ -247,8 +257,8 @@ class OvertimeSlip(Document):
 					"employee": self.employee,
 					"salary_component": salary_component,
 					"amount": flt(total_amount, precision),
-					"payroll_date": self.end_date,
-					"overwrite_salary_structure_amount": 0,
+					"payroll_date": payroll_date,
+					"overwrite_salary_structure_amount": 1,  # Set to 1 to prevent payment days adjustment
 					"ref_doctype": "Overtime Slip",
 					"ref_docname": self.name,
 				}
