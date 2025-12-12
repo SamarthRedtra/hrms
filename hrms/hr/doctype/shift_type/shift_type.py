@@ -412,7 +412,7 @@ class ShiftType(Document):
 	def get_holiday_list(self, employee: str) -> str:
 		return self.holiday_list or get_holiday_list_for_employee(employee, False)
 
-	def _is_holiday_cached(self, employee: str, attendance_date: str | datetime.date) -> bool:
+	def _is_holiday_cached(self, employee: str, attendance_date: str | date) -> bool:
 		key = (employee, str(attendance_date))
 		if not hasattr(self, "_holiday_cache"):
 			self._holiday_cache = {}
