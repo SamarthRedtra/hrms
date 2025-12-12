@@ -5,6 +5,8 @@
 from datetime import date, datetime, timedelta
 from itertools import groupby
 
+import time
+
 import frappe
 from frappe import _
 from frappe.model.document import Document
@@ -32,7 +34,7 @@ from hrms.hr.doctype.shift_assignment.shift_assignment import get_employee_shift
 from hrms.utils import get_date_range
 from hrms.utils.holiday_list import get_holiday_dates_between
 
-EMPLOYEE_CHUNK_SIZE = 50
+EMPLOYEE_CHUNK_SIZE = 20
 
 
 class ShiftType(Document):
@@ -116,6 +118,8 @@ class ShiftType(Document):
 		):
 			return
 
+		self._holiday_cache = {}
+
 		logs = self.get_employee_checkins()
 		
 		if cint(self.enable_flexible_log_pairing):
@@ -146,10 +150,7 @@ class ShiftType(Document):
 
 		# If working hours could not be derived (e.g., IN/OUT pairing failed),
 		# fall back to first/last log timestamps to avoid zero-hour attendance.
-			print(working_hours == 0 , single_shift_logs)
 			if working_hours == 0 and single_shift_logs:
-				print("fallback_in")
-				print("fallback_out")
 				fallback_in = getattr(single_shift_logs[0], "time", None)
 				fallback_out = getattr(single_shift_logs[-1], "time", None) if len(single_shift_logs) > 1 else None
 				if fallback_in and fallback_out and fallback_out > fallback_in:
@@ -161,7 +162,7 @@ class ShiftType(Document):
 			if (
 				cint(self.mark_holiday_weekoff_present_if_worked)
 				and flt(working_hours) > 0
-				and is_holiday(self.get_holiday_list(employee), attendance_date)
+				and self._is_holiday_cached(employee, attendance_date)
 				and attendance_status == "Absent"
 			):
 				attendance_status = "Present"
@@ -187,7 +188,7 @@ class ShiftType(Document):
 				attendance_doc
 				and cint(self.mark_holiday_weekoff_present_if_worked)
 				and working_hours
-				and is_holiday(self.get_holiday_list(employee), attendance_date)
+				and self._is_holiday_cached(employee, attendance_date)
 			):
 				holiday_ot_type = overtime_type or self.overtime_type
 				if holiday_ot_type:
@@ -294,7 +295,7 @@ class ShiftType(Document):
 			shift_details = get_employee_shift(employee, timestamp, True)
 
 			if shift_details and shift_details.shift_type.name == self.name:
-				attendance = mark_attendance(employee, date, "Absent", self.name)
+				attendance = self._mark_attendance_with_retry(employee, date)
 
 				if not attendance:
 					continue
@@ -308,6 +309,18 @@ class ShiftType(Document):
 						"content": frappe._("Employee was marked Absent due to missing Employee Checkins."),
 					}
 				).insert(ignore_permissions=True)
+
+	def _mark_attendance_with_retry(self, employee: str, date: datetime.date, max_retries: int = 3):
+		"""Create Absent attendance with retries to avoid tabSeries deadlocks."""
+		for attempt in range(1, max_retries + 1):
+			try:
+				return mark_attendance(employee, date, "Absent", self.name)
+			except frappe.QueryDeadlockError:
+				frappe.db.rollback()
+				if attempt == max_retries:
+					raise
+				# small backoff before retry
+				time.sleep(0.2 * attempt)
 
 	def get_dates_for_attendance(self, employee: str) -> list[str]:
 		start_date, end_date = self.get_start_and_end_dates(employee)
@@ -397,8 +410,18 @@ class ShiftType(Document):
 		return list(set(assigned_employees) - set(inactive_employees))
 
 	def get_holiday_list(self, employee: str) -> str:
-		holiday_list_name = self.holiday_list or get_holiday_list_for_employee(employee, False)
-		return holiday_list_name
+		return self.holiday_list or get_holiday_list_for_employee(employee, False)
+
+	def _is_holiday_cached(self, employee: str, attendance_date: str | datetime.date) -> bool:
+		key = (employee, str(attendance_date))
+		if not hasattr(self, "_holiday_cache"):
+			self._holiday_cache = {}
+		if key in self._holiday_cache:
+			return self._holiday_cache[key]
+		holiday_list = self.get_holiday_list(employee)
+		result = is_holiday(holiday_list, attendance_date)
+		self._holiday_cache[key] = result
+		return result
 
 	def should_mark_attendance(self, employee: str, attendance_date: str, working_hours: float = 0) -> bool:
 		"""Determines whether attendance should be marked on holidays or not"""
