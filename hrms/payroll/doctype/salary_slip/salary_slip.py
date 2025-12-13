@@ -895,6 +895,9 @@ class SalarySlip(TransactionBase):
 			force_fixed_30_days=use_fixed_payment_days,
 		)
 
+		# Apply absenteeism penalty (extra one-day deduction per absent day) when enabled on shift type
+		self.apply_absenteeism_penalty()
+
 		# Build pending deductions summary from future Additional Salary deduction components
 		try:
 			AS = frappe.qb.DocType("Additional Salary")
@@ -1357,6 +1360,9 @@ class SalarySlip(TransactionBase):
 
 		if self.salary_structure:
 			self.calculate_component_amounts("earnings")
+
+		# Ensure absenteeism penalty is applied during draft calculation as well
+		self.apply_absenteeism_penalty()
 
 		set_gross_pay_and_base_gross_pay()
 
@@ -2657,6 +2663,78 @@ class SalarySlip(TransactionBase):
 			total += amount
 
 		return total
+
+	def apply_absenteeism_penalty(self):
+		"""If Shift Type enforces absenteeism penalty, add a flat one-day deduction when absent."""
+		penalty_trigger = flt(self.absent_days) if flt(getattr(self, "absent_days", 0)) else flt(self.leave_without_pay)
+		if not penalty_trigger:
+			return
+
+		shift_type = self._get_shift_for_penalty()
+		if not shift_type:
+			return
+
+		apply_penalty = frappe.db.get_value("Shift Type", shift_type, "apply_absenteeism_penalty")
+		if not cint(apply_penalty):
+			return
+
+		penalty_component = "Absenteeism Penalty"
+		if not frappe.db.exists("Salary Component", penalty_component):
+			return
+
+		# compute per-day earning base using standard structure earnings only (exclude additional/overtime)
+		daily_base = 0.0
+		if cint(self.total_working_days):
+			base_earnings = 0.0
+			for row in (self.earnings or []):
+				# Exclude additional salary (e.g., overtime) and zeroed rows
+				if getattr(row, "additional_salary", 0):
+					continue
+				base_earnings += flt(row.default_amount or row.amount)
+
+			daily_base = flt(base_earnings) / cint(self.total_working_days)
+
+		# Only one extra day fine regardless of absent days count (as long as >= 1)
+		penalty_amount = daily_base
+		if not penalty_amount:
+			return
+
+		# if already present, increment; else append
+		existing = next((d for d in self.deductions or [] if d.salary_component == penalty_component), None)
+		if existing:
+			return
+		else:
+			self.append(
+				"deductions",
+				{
+					"salary_component": penalty_component,
+					"amount": penalty_amount,
+					"default_amount": penalty_amount,
+					"depends_on_payment_days": 0,
+				},
+			)
+
+	def _get_shift_for_penalty(self):
+		# Prefer employee default shift without caching to avoid stale reads
+		default_shift = frappe.db.get_value("Employee", self.employee, "default_shift")
+		if default_shift:
+			return default_shift
+
+		# Fallback: latest active shift assignment overlapping the payroll period
+		assignments = frappe.db.get_all(
+			"Shift Assignment",
+			filters={
+				"employee": self.employee,
+				"status": "Active",
+				"start_date": ("<=", self.end_date),
+			},
+			or_filters=[["end_date", ">=", self.start_date], ["end_date", "is", "not set"]],
+			fields=["shift_type"],
+			order_by="start_date desc",
+			limit=1,
+		)
+
+		return assignments[0].shift_type if assignments else None
 
 	def email_salary_slip(self):
 		receiver = frappe.db.get_value("Employee", self.employee, "prefered_email", cache=True)

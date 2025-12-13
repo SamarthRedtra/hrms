@@ -94,13 +94,23 @@ class RotateHoliday(Document):
 		previous_day = add_days(getdate(self.date), -1)
 
 		# Check if attendance already exists for previous day
-		existing_attendance = frappe.db.exists(
+		existing_attendance = frappe.db.get_value(
 			"Attendance",
 			{"employee": self.employee, "attendance_date": previous_day, "docstatus": ["!=", 2]},
+			["name", "status", "docstatus"],
+			as_dict=True,
 		)
 
 		if existing_attendance:
-			# Attendance exists, no need to create
+			# If it is Absent, convert to On Leave (week off) and log a comment
+			if existing_attendance.status == "Absent":
+				att_doc = frappe.get_doc("Attendance", existing_attendance.name)
+				att_doc.flags.ignore_validate = True
+				att_doc.db_set("status", "Weekly Off", update_modified=False)
+				att_doc.add_comment(
+					"Comment",
+					text=_("Updated to Week Off (Rotate Holiday off-day adjustment)."),
+				)
 			return
 
 		# Get employee's company
@@ -111,15 +121,15 @@ class RotateHoliday(Document):
 			"doctype": "Attendance",
 			"employee": self.employee,
 			"attendance_date": previous_day,
-			"status": "On Leave",
+			"status": "Weekly Off",
 			"company": company,
 		})
 		attendance.flags.ignore_validate = True  # Skip validation for auto-created entry
 		attendance.insert(ignore_permissions=True)
 		attendance.submit()
-
+		print("attendance",attendance)
 		frappe.msgprint(
-			_("Attendance marked as 'On Leave' (Week Off) for {0} on {1}").format(
+			_("Attendance marked as 'Weekly Off' for {0} on {1}").format(
 				self.employee_name or self.employee,
 				frappe.format(previous_day, {"fieldtype": "Date"})
 			),

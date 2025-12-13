@@ -16,6 +16,7 @@
   "salary_structure",
   "from_date",
   "income_tax_slab",
+  "accommodation",
   "column_break_11",
   "company",
   "payroll_payable_account",
@@ -227,11 +228,19 @@
    "fieldname": "max_benefits",
    "fieldtype": "Currency",
    "label": "Maximum Benefit Amount"
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "0",
+   "description": "check if company is providing the accommodation to the employee.",
+   "fieldname": "accommodation",
+   "fieldtype": "Check",
+   "label": "Accommodation"
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2025-09-03 17:06:42.296943",
+ "modified": "2025-12-13 18:52:45.259757",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Salary Structure Assignment",

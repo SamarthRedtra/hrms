@@ -10,6 +10,7 @@
   "start_time",
   "end_time",
   "location_radius_check",
+  "apply_absenteeism_penalty",
   "column_break_3",
   "holiday_list",
   "color",
@@ -216,6 +217,13 @@
    "fieldname": "mark_holiday_weekoff_present_if_worked",
    "fieldtype": "Check",
    "label": "Mark Holiday/Weekoff as Present If Worked"
+  },
+  {
+   "default": "0",
+   "description": "When enabled, for each absent day add an extra one-day salary deduction (component: Absenteeism Penalty).",
+   "fieldname": "apply_absenteeism_penalty",
+   "fieldtype": "Check",
+   "label": "Apply Absenteeism Penalty"
   },
   {
    "depends_on": "eval:doc.allow_overtime == 1",
