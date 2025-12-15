@@ -207,6 +207,7 @@ class BulkEmployeeChekin(Document):
 			message={"success": success, "failure": failure},
 			doctype="Bulk Employee Checkin",
 			after_commit=True,
+			user=frappe.session.user,
 		)
 
 	def _bulk_create_in_out_checkins_twice(
@@ -322,6 +323,7 @@ class BulkEmployeeChekin(Document):
 			message={"success": success, "failure": failure},
 			doctype="Bulk Employee Checkin",
 			after_commit=True,
+			user=frappe.session.user,
 		)
 	@frappe.whitelist()
 	def bulk_create_in_out_checkins(
@@ -536,6 +538,7 @@ class BulkEmployeeChekin(Document):
 			message={"success": success, "failure": failure},
 			doctype="Bulk Employee Checkin",
 			after_commit=True,
+			user=frappe.session.user,
 		)
 
 	def _bulk_create_in_out_checkins_twice(
@@ -651,4 +654,5 @@ class BulkEmployeeChekin(Document):
 			message={"success": success, "failure": failure},
 			doctype="Bulk Employee Checkin",
 			after_commit=True,
+			user=frappe.session.user,
 		)
