@@ -8,14 +8,16 @@
  "icon_type": "Link",
  "idx": 0,
  "label": "Recruitment",
+ "link": "",
  "link_to": "Recruitment",
  "link_type": "Workspace",
  "logo_url": "/assets/hrms/icons/desktop_icons/recruitment.svg",
- "modified": "2025-11-17 20:46:06.864491",
+ "modified": "2025-12-20 00:22:49.354164",
  "modified_by": "Administrator",
  "name": "Recruitment",
  "owner": "Administrator",
- "parent_icon": "Frappe HR",
+ "parent_icon": "Redtra HR",
  "roles": [],
+ "sidebar": "Recruitment",
  "standard": 1
 }

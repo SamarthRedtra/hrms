@@ -8,14 +8,15 @@
  "icon_type": "Link",
  "idx": 0,
  "label": "Shift & Attendance",
+ "link": "",
  "link_to": "Shift & Attendance",
  "link_type": "Workspace",
  "logo_url": "/assets/hrms/icons/desktop_icons/shift-attendence.svg",
- "modified": "2025-11-25 11:53:05.391673",
+ "modified": "2025-12-20 00:21:40.380984",
  "modified_by": "Administrator",
  "name": "Shift & Attendance",
  "owner": "Administrator",
- "parent_icon": "Frappe HR",
+ "parent_icon": "Redtra HR",
  "roles": [],
  "standard": 1
 }

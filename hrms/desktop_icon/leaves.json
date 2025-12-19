@@ -11,11 +11,12 @@
  "link_to": "Leaves",
  "link_type": "Workspace",
  "logo_url": "/assets/hrms/icons/desktop_icons/leaves.svg",
- "modified": "2025-11-17 20:46:44.257193",
+ "modified": "2025-12-20 00:22:40.298962",
  "modified_by": "Administrator",
  "name": "Leaves",
  "owner": "Administrator",
- "parent_icon": "Frappe HR",
+ "parent_icon": "Redtra HR",
  "roles": [],
+ "sidebar": "Leaves",
  "standard": 1
 }

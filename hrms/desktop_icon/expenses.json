@@ -8,14 +8,15 @@
  "icon_type": "Link",
  "idx": 0,
  "label": "Expenses",
- "link_to": "Expenses",
+ "link_to": "",
  "link_type": "Workspace",
  "logo_url": "/assets/hrms/icons/desktop_icons/expense_claim.svg",
- "modified": "2025-11-18 15:51:58.613460",
+ "modified": "2025-12-20 00:22:27.125285",
  "modified_by": "Administrator",
  "name": "Expenses",
  "owner": "Administrator",
- "parent_icon": "Frappe HR",
+ "parent_icon": "Redtra HR",
  "roles": [],
+ "sidebar": "Expense Claims",
  "standard": 1
 }
