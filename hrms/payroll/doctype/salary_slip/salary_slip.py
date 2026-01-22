@@ -2699,6 +2699,9 @@ class SalarySlip(TransactionBase):
 		if not penalty_amount:
 			return
 
+		# Round penalty to nearest integer
+		penalty_amount = rounded(penalty_amount)
+
 		# if already present, increment; else append
 		existing = next((d for d in self.deductions or [] if d.salary_component == penalty_component), None)
 		if existing:
