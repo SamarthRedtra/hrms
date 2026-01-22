@@ -443,6 +443,7 @@ class OvertimeSlip(Document):
 				"hourly_rate",
 				"gross_percentage",
 				"treat_holiday_hours_as_full_overtime",
+				"use_full_component_amount",
 			],
 		)
 
@@ -503,6 +504,9 @@ class OvertimeSlip(Document):
 
 		# Check if payroll setting requires 30 days calculation regardless of attendance
 		calculate_based_on_30_days = frappe.db.get_single_value("Payroll Settings", "calculate_overtime_based_on_30_days")
+		use_full_component_amount = self.overtime_types[overtime_type].get("use_full_component_amount")
+		payment_days = flt(self._cached_salary_slip.payment_days)
+		total_working_days = flt(getattr(self._cached_salary_slip, "total_working_days", 0)) or 30
 
 		# Get component amount from salary slip
 		actual_component_amount = sum(
@@ -511,16 +515,25 @@ class OvertimeSlip(Document):
 			if data.salary_component in components and not data.get("additional_salary", None)
 		)
 
-		if calculate_based_on_30_days:
+		if use_full_component_amount:
+			# Reconstruct the full component amount by reversing payment day proration
+			# Example: (prorated_amount / payment_days) * total_working_days
+			component_amount = (
+				(actual_component_amount / payment_days) * total_working_days if payment_days else actual_component_amount
+			)
+			fixed_payment_days = total_working_days
+		elif calculate_based_on_30_days:
 			# Normalize component amount to 30-day equivalent
 			# Formula: (actual_amount ÷ payment_days) × 30
 			actual_payment_days = 30
-			component_amount = (actual_component_amount / actual_payment_days) * 30 if actual_payment_days > 0 else actual_component_amount
+			component_amount = (
+				(actual_component_amount / actual_payment_days) * 30 if actual_payment_days > 0 else actual_component_amount
+			)
 			fixed_payment_days = 30
 		else:
 			# Use actual component amount and payment days from salary slip
 			component_amount = actual_component_amount
-			fixed_payment_days = flt(self._cached_salary_slip.payment_days) or 30
+			fixed_payment_days = payment_days or 30
 
 		fixed_working_hours_per_day = 8 or standard_working_hours
 		applicable_daily_amount = component_amount / fixed_payment_days if fixed_payment_days else 0
