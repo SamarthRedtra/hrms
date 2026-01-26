@@ -15,6 +15,7 @@
   "leave_type",
   "company",
   "department",
+  "ticket_sponsored",
   "section_break_5",
   "from_date",
   "to_date",
@@ -248,6 +249,12 @@
    "fieldname": "sb_other_details",
    "fieldtype": "Section Break",
    "label": "Other Details"
+  },
+  {
+   "default": "0",
+   "fieldname": "ticket_sponsored",
+   "fieldtype": "Check",
+   "label": "Ticket sponsored"
   }
  ],
  "icon": "fa fa-calendar",
@@ -255,7 +262,7 @@
  "is_submittable": 1,
  "links": [],
  "max_attachments": 3,
- "modified": "2024-04-08 13:56:03.818019",
+ "modified": "2026-01-26 22:24:01.063671",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "Leave Application",
@@ -307,7 +314,6 @@
    "write": 1
   },
   {
-   "amend": 1,
    "cancel": 1,
    "delete": 1,
    "email": 1,
@@ -345,6 +351,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "search_fields": "employee,employee_name,leave_type,from_date,to_date,total_leave_days",
  "sort_field": "creation",
  "sort_order": "DESC",
