@@ -251,6 +251,7 @@
    "label": "Other Details"
   },
   {
+   "allow_on_submit": 1,
    "default": "0",
    "fieldname": "ticket_sponsored",
    "fieldtype": "Check",
@@ -262,7 +263,7 @@
  "is_submittable": 1,
  "links": [],
  "max_attachments": 3,
- "modified": "2026-01-26 22:24:01.063671",
+ "modified": "2026-01-26 23:56:49.234144",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "Leave Application",
