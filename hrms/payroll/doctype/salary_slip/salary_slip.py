@@ -138,6 +138,22 @@ class SalarySlip(TransactionBase):
 			if self.joining_date and getdate(self.start_date) < self.joining_date <= getdate(self.end_date):
 				self.__actual_start_date = self.joining_date
 
+			# Also check for Salary Structure Assignment starting mid-period
+			# If the only valid assignment starts after start_date/joining_date, then actual_start_date should be its from_date
+			ssa_from_date = frappe.db.get_value("Salary Structure Assignment",
+				{"employee": self.employee, "docstatus": 1, "from_date": ["between", [self.start_date, self.end_date]]},
+				"from_date", order_by="from_date asc")
+			
+			if ssa_from_date:
+				# Check if there is any assignment covering the current actual_start_date
+				has_earlier_assignment = frappe.db.exists("Salary Structure Assignment", {
+					"employee": self.employee,
+					"docstatus": 1,
+					"from_date": ["<=", self.__actual_start_date]
+				})
+				if not has_earlier_assignment and getdate(self.__actual_start_date) < ssa_from_date:
+					self.__actual_start_date = ssa_from_date
+
 		return self.__actual_start_date
 
 	@property
@@ -203,7 +219,7 @@ class SalarySlip(TransactionBase):
 			fields=["time", "log_type", "project", "name"],
 			filters={
 				"employee": self.employee,
-				"time": ["between", [get_datetime(self.start_date), get_datetime(add_days(self.end_date, 1))]],
+				"time": ["between", [get_datetime(self.actual_start_date), get_datetime(add_days(self.actual_end_date, 1))]],
 			},
 			order_by="time asc",
 		)
@@ -381,8 +397,8 @@ class SalarySlip(TransactionBase):
 			filters={
 				"employee": self.employee,
 				"docstatus": 1,
-				"start_date": ("<=", self.end_date),
-				"end_date": (">=", self.start_date),
+				"start_date": ("<=", self.actual_end_date),
+				"end_date": (">=", self.actual_start_date),
 			},
 			pluck="name",
 		)
@@ -391,7 +407,7 @@ class SalarySlip(TransactionBase):
 			"Overtime Details",
 			filters={
 				"parent": ["in", slip_names] if slip_names else None,
-				"date": ["between", [self.start_date, self.end_date]],
+				"date": ["between", [self.actual_start_date, self.actual_end_date]],
 			},
 			fields=[
 				"parent",
@@ -432,7 +448,7 @@ class SalarySlip(TransactionBase):
 					applicable_hourly_rate = slip_doc._get_applicable_hourly_rate(
 						row.overtime_type, row.get("standard_working_hours")
 					)
-					amount, _ = slip_doc.calculate_overtime_amount(
+					amount, meta = slip_doc.calculate_overtime_amount(
 						row.overtime_type,
 						applicable_hourly_rate,
 						row.overtime_duration,
@@ -810,12 +826,12 @@ class SalarySlip(TransactionBase):
 			self.payment_days = self.total_working_days
 			return
 
-		holidays = self.get_holidays_for_employee(self.start_date, self.end_date)
+		holidays = self.get_holidays_for_employee(self.actual_start_date, self.actual_end_date)
 
 		# Set preview actual_working_days same as working_days and return
 		# (actual inclusion of holidays worked is handled in full computation below)
 
-		working_days_list = [add_days(getdate(self.start_date), days=day) for day in range(0, working_days)]
+		working_days_list = [add_days(getdate(self.actual_start_date), days=day) for day in range(0, (date_diff(self.actual_end_date, self.actual_start_date) + 1))]
 
 		if not cint(payroll_settings.include_holidays_in_total_working_days):
 			working_days_list = [i for i in working_days_list if i not in holidays]
@@ -1072,10 +1088,10 @@ class SalarySlip(TransactionBase):
 
 		days = 0
 		if self.actual_start_date != self.start_date:
-			days += _get_days(self.start_date, add_days(self.joining_date, -1))
+			days += _get_days(self.start_date, add_days(self.actual_start_date, -1))
 
 		if self.actual_end_date != self.end_date:
-			days += _get_days(add_days(self.relieving_date, 1), self.end_date)
+			days += _get_days(add_days(self.actual_end_date, 1), self.end_date)
 
 		return days
 
@@ -1165,8 +1181,8 @@ class SalarySlip(TransactionBase):
 		lwp = 0
 		leaves = get_lwp_or_ppl_for_date_range(
 			self.employee,
-			self.start_date,
-			self.end_date,
+			self.actual_start_date,
+			self.actual_end_date,
 		)
 
 		for d in working_days_list:
@@ -1249,7 +1265,7 @@ class SalarySlip(TransactionBase):
 
 		leave_type_map = self.get_leave_type_map()
 		attendance_details = self.get_employee_attendance(
-			start_date=self.start_date, end_date=self.actual_end_date
+			start_date=self.actual_start_date, end_date=self.actual_end_date
 		)
 
 		for d in attendance_details:
@@ -1316,7 +1332,7 @@ class SalarySlip(TransactionBase):
 			)
 
 	def set_salary_structure_assignment(self):
-		self._salary_structure_assignment = frappe.db.get_value(
+		assignment = frappe.db.get_value(
 			"Salary Structure Assignment",
 			{
 				"employee": self.employee,
@@ -1329,13 +1345,40 @@ class SalarySlip(TransactionBase):
 			as_dict=True,
 		)
 
+		if not assignment:
+			assignment = frappe.db.get_value(
+				"Salary Structure Assignment",
+				{
+					"employee": self.employee,
+					"salary_structure": self.salary_structure,
+					"from_date": ("<=", self.actual_end_date),
+					"docstatus": 1,
+				},
+				"*",
+				order_by="from_date asc",
+				as_dict=True,
+			)
+
+			if assignment:
+				# Adjust actual_start_date to assignment date
+				from frappe.utils import getdate
+
+				if not hasattr(self, "__actual_start_date"):
+					self.actual_start_date
+
+				if getdate(assignment.from_date) > getdate(self.actual_start_date):
+					self.__actual_start_date = assignment.from_date
+					self.get_working_days_details()
+
+		self._salary_structure_assignment = assignment
+
 		if not self._salary_structure_assignment:
 			frappe.throw(
 				_(
 					"Please assign a Salary Structure for Employee {0} applicable from or before {1} first"
 				).format(
 					frappe.bold(self.employee_name),
-					frappe.bold(formatdate(self.actual_start_date)),
+					frappe.bold(formatdate(self.actual_end_date)),
 				)
 			)
 
@@ -2064,7 +2107,7 @@ class SalarySlip(TransactionBase):
 
 	def add_additional_salary_components(self, component_type):
 		additional_salaries = get_additional_salaries(
-			self.employee, self.start_date, self.end_date, component_type
+			self.employee, self.actual_start_date, self.actual_end_date, component_type
 		)
 
 		for additional_salary in additional_salaries:

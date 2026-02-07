@@ -497,7 +497,16 @@ class OvertimeSlip(Document):
 
 		if not hasattr(self, "_cached_salary_slip"):
 			salary_structure = get_assigned_salary_structure(self.employee, self.start_date)
-			self._cached_salary_slip = self._make_salary_slip(salary_structure)
+			active_on = self.start_date
+			if not salary_structure:
+				# Try end date as fallback for mid-period assignments
+				salary_structure = get_assigned_salary_structure(self.employee, self.end_date)
+				active_on = self.end_date
+
+			if salary_structure:
+				self._cached_salary_slip = self._make_salary_slip(salary_structure, posting_date=active_on)
+			else:
+				self._cached_salary_slip = None
 
 		if not components or not hasattr(self, "_cached_salary_slip"):
 			return 0.0
@@ -515,27 +524,36 @@ class OvertimeSlip(Document):
 			if data.salary_component in components and not data.get("additional_salary", None)
 		)
 
-		if use_full_component_amount:
+		if calculate_based_on_30_days:
+			# Force 30-day baseline as requested
+			# We need the full component amount from Salary Structure to avoid proration issues
+			component_amount = 0
+			struct_doc = frappe.get_cached_doc("Salary Structure", self._cached_salary_slip.salary_structure)
+			for d in struct_doc.earnings:
+				if d.salary_component in components:
+					if d.amount_based_on_formula:
+						# If formula based, we use the prorated amount and reverse it
+						# (prorated_amount / payment_days) * total_working_days gives full month
+						# Then we normalize to 30 if needed
+						full_month_amount = (actual_component_amount / payment_days * total_working_days) if payment_days else actual_component_amount
+						component_amount = full_month_amount
+					else:
+						component_amount += flt(d.amount)
+			
+			fixed_payment_days = 30
+		elif use_full_component_amount:
 			# Reconstruct the full component amount by reversing payment day proration
 			# Example: (prorated_amount / payment_days) * total_working_days
 			component_amount = (
 				(actual_component_amount / payment_days) * total_working_days if payment_days else actual_component_amount
 			)
 			fixed_payment_days = total_working_days
-		elif calculate_based_on_30_days:
-			# Normalize component amount to 30-day equivalent
-			# Formula: (actual_amount ÷ payment_days) × 30
-			actual_payment_days = 30
-			component_amount = (
-				(actual_component_amount / actual_payment_days) * 30 if actual_payment_days > 0 else actual_component_amount
-			)
-			fixed_payment_days = 30
 		else:
 			# Use actual component amount and payment days from salary slip
 			component_amount = actual_component_amount
 			fixed_payment_days = payment_days or 30
 
-		fixed_working_hours_per_day = 8 or standard_working_hours
+		fixed_working_hours_per_day = 8
 		applicable_daily_amount = component_amount / fixed_payment_days if fixed_payment_days else 0
 
 		return applicable_daily_amount / fixed_working_hours_per_day if fixed_working_hours_per_day else 0.0
@@ -549,18 +567,28 @@ class OvertimeSlip(Document):
 
 		if not hasattr(self, "_cached_salary_slip"):
 			salary_structure = get_assigned_salary_structure(self.employee, self.start_date)
-			self._cached_salary_slip = self._make_salary_slip(salary_structure)
+			active_on = self.start_date
+			if not salary_structure:
+				salary_structure = get_assigned_salary_structure(self.employee, self.end_date)
+				active_on = self.end_date
+			
+			if salary_structure:
+				self._cached_salary_slip = self._make_salary_slip(salary_structure, posting_date=active_on)
+				self._active_on = active_on
+			else:
+				self._cached_salary_slip = None
 
-		if not hasattr(self, "_cached_salary_slip") or not self._cached_salary_slip:
+		if not self._cached_salary_slip:
 			return 0.0
 
 		# Calculate gross salary (base + variable from Salary Structure Assignment)
 		try:
 			# Get Salary Structure Assignment for this employee
+			active_on = getattr(self, "_active_on", self.start_date)
 			ssa_filters = {
 				"employee": self.employee,
 				"docstatus": 1,
-				"from_date": ["<=", self.start_date]
+				"from_date": ["<=", active_on]
 			}
 
 			# Get the most recent assignment
@@ -618,15 +646,21 @@ class OvertimeSlip(Document):
 
 		return applicable_daily_amount / fixed_working_hours_per_day if fixed_working_hours_per_day else 0.0
 
-	def _make_salary_slip(self, salary_structure):
+	def _make_salary_slip(self, salary_structure, posting_date=None):
 		from hrms.payroll.doctype.salary_structure.salary_structure import make_salary_slip
 
-		return make_salary_slip(
+		doc = make_salary_slip(
 			salary_structure,
 			employee=self.employee,
 			ignore_permissions=True,
-			posting_date=self.start_date,
+			posting_date=posting_date or self.start_date,
 		)
+		# Force the period to match the overtime slip so that payment_days are correct
+		if doc:
+			doc.start_date = self.start_date
+			doc.end_date = self.end_date
+			doc.run_method("process_salary_structure", for_preview=True)
+		return doc
 
 	def calculate_overtime_amount(
 		self, overtime_type, applicable_hourly_rate, overtime_duration, overtime_date, holiday_date_map, shift=None
