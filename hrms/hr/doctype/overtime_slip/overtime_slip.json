@@ -17,6 +17,7 @@
   "section_break_fvyh",
   "start_date",
   "end_date",
+  "standard_working_hours",
   "salary_slip",
   "normal_ot_hours",
   "holiday_ot_hours",
@@ -128,6 +129,12 @@
    "fieldtype": "Date",
    "label": "End Date",
    "reqd": 1
+  },
+  {
+   "fieldname": "standard_working_hours",
+   "fieldtype": "Float",
+   "label": "Standard Working Hours",
+   "precision": "2"
   },
   {
    "depends_on": "payroll_entry",
