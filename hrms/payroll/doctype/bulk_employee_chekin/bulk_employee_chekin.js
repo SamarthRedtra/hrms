@@ -551,35 +551,27 @@ frappe.ui.form.on("Bulk Employee Chekin", {
             },
         });
 
-        // Pre-fill time with selected filter date + current time (ISO format to avoid moment warnings)
-        const nowTime = frappe?.datetime?.now_time ? frappe.datetime.now_time() : null;
-        const today = frappe?.datetime?.now_datetime ? frappe.datetime.now_datetime() : null;
-        if (frm.doc.date && nowTime) {
-            dialog.set_value("time", `${frm.doc.date} ${nowTime}`);
-            dialog.set_value("in_time", `${frm.doc.date} ${nowTime}`);
-            dialog.set_value("first_in_time", `${frm.doc.date} ${nowTime}`);
-            dialog.set_value("second_in_time", `${frm.doc.date} ${nowTime}`);
+        // Pre-fill today's default start/end times:
+        // start = 06:00, end = 17:00
+        const todayDate = frappe?.datetime?.get_today ? frappe.datetime.get_today() : null;
+        if (todayDate) {
+            const startTime = `${todayDate} 06:00:00`;
+            const endTime = `${todayDate} 17:00:00`;
+            const midOutTime = `${todayDate} 11:00:00`;
+            const secondInTime = `${todayDate} 13:00:00`;
 
-            // Set reasonable default times for second session (2 hours later)
-            const baseTime = moment(`${frm.doc.date} ${nowTime}`);
-            const firstOutTime = baseTime.clone().add(2, 'hours');
-            const secondOutTime = firstOutTime.clone().add(4, 'hours');
+            // Single entry defaults to start time
+            dialog.set_value("time", startTime);
 
-            dialog.set_value("first_out_time", firstOutTime.format('YYYY-MM-DD HH:mm:ss'));
-            dialog.set_value("second_out_time", secondOutTime.format('YYYY-MM-DD HH:mm:ss'));
-        } else if (today) {
-            dialog.set_value("time", today);
-            dialog.set_value("in_time", today);
-            dialog.set_value("first_in_time", today);
-            dialog.set_value("second_in_time", today);
+            // IN & OUT Together defaults
+            dialog.set_value("in_time", startTime);
+            dialog.set_value("out_time", endTime);
 
-            // Set reasonable default times for second session
-            const baseTime = moment(today);
-            const firstOutTime = baseTime.clone().add(2, 'hours');
-            const secondOutTime = firstOutTime.clone().add(4, 'hours');
-
-            dialog.set_value("first_out_time", firstOutTime.format('YYYY-MM-DD HH:mm:ss'));
-            dialog.set_value("second_out_time", secondOutTime.format('YYYY-MM-DD HH:mm:ss'));
+            // IN & OUT Twice defaults
+            dialog.set_value("first_in_time", startTime);
+            dialog.set_value("first_out_time", midOutTime);
+            dialog.set_value("second_in_time", secondInTime);
+            dialog.set_value("second_out_time", endTime);
         }
         dialog.show();
     },
