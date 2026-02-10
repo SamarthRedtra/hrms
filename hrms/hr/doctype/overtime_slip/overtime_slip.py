@@ -751,6 +751,14 @@ class OvertimeSlip(Document):
 
 		return holiday_date_map
 
+	@frappe.whitelist()
+	def get_holiday_dates(self):
+		"""Return holiday/weekend dates for this employee and slip period."""
+		if not (self.employee and self.start_date and self.end_date):
+			return []
+
+		return sorted(self.get_holiday_map().keys())
+
 	def get_overtime_type_details(self, name):
 		details = frappe.get_value(
 			"Overtime Type",

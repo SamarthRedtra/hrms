@@ -214,6 +214,28 @@ class SalarySlip(TransactionBase):
 		if not (self.start_date and self.end_date and self.employee):
 			return
 
+		# Attendance is the primary source-of-truth for status/hours.
+		attendance_rows = frappe.get_all(
+			"Attendance",
+			filters={
+				"employee": self.employee,
+				"attendance_date": ["between", [self.actual_start_date, self.actual_end_date]],
+				"docstatus": 1,
+			},
+			fields=[
+				"attendance_date",
+				"status",
+				"half_day_status",
+				"project",
+				"working_hours",
+				"actual_overtime_duration",
+				"standard_working_hours",
+				"rate",
+				"multiplier",
+			],
+		)
+		attendance_by_date = {getdate(r.attendance_date): r for r in attendance_rows}
+
 		checkins = frappe.db.get_all(
 			"Employee Checkin",
 			fields=["time", "log_type", "project", "name"],
@@ -224,84 +246,147 @@ class SalarySlip(TransactionBase):
 			order_by="time asc",
 		)
 
-		by_date = {}
+		checkins_by_date = {}
 		for row in checkins:
-			by_date.setdefault(getdate(row.time), []).append(row)
+			checkins_by_date.setdefault(getdate(row.time), []).append(row)
+
+		holiday_dates = set(getdate(d) for d in (self.get_holidays_for_employee(self.actual_start_date, self.actual_end_date) or []))
 
 		total_regular_seconds = 0
 		total_ot_seconds = 0
 		total_ot_amount = 0
 
-		ot_meta_by_date = self._get_overtime_amounts_by_date()
+		ot_meta_by_date, has_ot_slips = self._get_overtime_amounts_by_date()
 
 		self.set("attendance_breakup", [])
-		for day in sorted(by_date.keys()):
-			day_rows = sorted(by_date[day], key=lambda r: r.time)
-			total_seconds = self._compute_total_seconds(day_rows)
-			reg_seconds = total_seconds
+		day = getdate(self.actual_start_date)
+		end_day = getdate(self.actual_end_date)
+		while day and end_day and day <= end_day:
+			att = attendance_by_date.get(day)
+			day_rows = sorted(checkins_by_date.get(day, []), key=lambda r: r.time)
+
+			checkin_seconds = self._compute_total_seconds(day_rows) if day_rows else 0
+			checkin_hours = flt(checkin_seconds / 3600, 2) if checkin_seconds else 0
+
+			attendance_hours = flt(att.get("working_hours")) if att and att.get("working_hours") is not None else None
+			worked_hours = attendance_hours if attendance_hours is not None else (checkin_hours or 0)
 
 			first_in = next((r for r in day_rows if r.log_type == "IN"), None)
 			last_out = next((r for r in reversed(day_rows) if r.log_type == "OUT"), None)
-			status = "Present" if total_seconds else "Absent"
+			first_log = day_rows[0] if day_rows else None
+			last_log = day_rows[-1] if day_rows else None
 
-			ot_amount = None
-			ot_hours = 0
-			std_hours = None
-			meta_project = None
-			meta_rate = None
-			meta_multiplier = None
+			check_in_time = first_in.time if first_in else (first_log.time if first_log else None)
+			check_out_time = last_out.time if last_out else (last_log.time if last_log else None)
 
-			if ot_meta_by_date and day in ot_meta_by_date:
-				meta = ot_meta_by_date[day]
-				ot_amount = meta.get("ot_amount")
-				ot_hours = meta.get("ot_hours") or 0
-				if meta.get("standard_working_hours"):
-					std_hours = meta.get("standard_working_hours")
-				meta_project = meta.get("project")
-				meta_rate = meta.get("rate")
-				meta_multiplier = meta.get("multiplier")
+			is_holiday = day in holiday_dates
 
-			if std_hours is None:
-				std_hours = self._get_standard_working_hours(day)
-
-			# If no OT from slip, derive OT hours as anything beyond standard_working_hours (fallback 8h)
-			if ot_hours == 0:
-				baseline_hours = std_hours if std_hours else 8
-				derived_ot_seconds = total_seconds - baseline_hours * 3600 if total_seconds > baseline_hours * 3600 else 0
-				ot_hours = flt(derived_ot_seconds / 3600, 2)
-
-			ot_seconds = ot_hours * 3600
-			# If we know standard working hours, cap regular to that baseline
-			if std_hours:
-				reg_seconds = min(total_seconds, std_hours * 3600)
+			# Status priority: Attendance -> Holiday -> Absent.
+			if att:
+				status = att.get("status") or ("Present" if worked_hours else "Absent")
+				if status == "Half Day" and att.get("half_day_status"):
+					status = f"Half Day - {att.get('half_day_status')}"
 			else:
-				reg_seconds = max(total_seconds - ot_seconds, 0)
+				if is_holiday:
+					status = "Holiday"
+				else:
+					status = "Absent"
+
+			meta = ot_meta_by_date.get(day) if ot_meta_by_date else None
+			meta_project = meta.get("project") if meta else None
+			meta_rate = meta.get("rate") if meta else None
+			meta_multiplier = meta.get("multiplier") if meta else None
+
+			# Standard working hours baseline (used for calculations). On holidays, we display 0.
+			# Use truthy check for meta: treat 0 as "not set" so attendance value takes precedence.
+			std_hours_baseline = None
+			if meta and meta.get("standard_working_hours"):
+				std_hours_baseline = flt(meta.get("standard_working_hours"))
+			elif att and att.get("standard_working_hours") is not None:
+				std_hours_baseline = flt(att.get("standard_working_hours"))
+			else:
+				std_hours_baseline = self._get_standard_working_hours(day)
+
+			# OT hours / amount: trust OT Slip meta when present, else use Attendance fields, else derive.
+			ot_hours = flt(meta.get("ot_hours")) if (meta and meta.get("ot_hours") is not None) else 0
+			ot_amount = meta.get("ot_amount") if meta else None
+
+			# Holiday rule: Standard working hours + overtime are treated as overtime; regular hours are 0.
+			# Also enter this block when OT slip meta exists on a holiday (even without attendance/checkins).
+			has_holiday_ot = meta and flt(meta.get("ot_hours"))
+			if is_holiday and (worked_hours or has_holiday_ot):
+				if not meta and not has_ot_slips:
+					att_std = flt(att.get("standard_working_hours")) if att and att.get("standard_working_hours") is not None else 0
+					shift_std = flt(std_hours_baseline) if std_hours_baseline is not None else 0
+					baseline_std = att_std or shift_std
+					att_ot = flt(att.get("actual_overtime_duration")) if att and att.get("actual_overtime_duration") else 0
+					ot_hours = flt((baseline_std + att_ot) if (baseline_std or att_ot) else worked_hours, 2)
+					# Compute amount using attendance rate/multiplier if available
+					if att and att.get("rate"):
+						ot_amount = flt(ot_hours * flt(att.get("rate")) * flt(att.get("multiplier") or 1), 2)
+					else:
+						ot_amount = self._compute_ot_amount(ot_hours * 3600, day)
+				regular_hours = 0
+				std_hours_display = 0
+			else:
+				# Normal day: prefer Attendance actual overtime when OT slip meta isn't available.
+				# Skip derivation when OT slips exist — the slip is authoritative for which dates have OT.
+				if (not meta) and att and att.get("actual_overtime_duration") and not has_ot_slips:
+					ot_hours = flt(att.get("actual_overtime_duration"), 2)
+					if att.get("rate"):
+						ot_amount = flt(ot_hours * flt(att.get("rate")) * flt(att.get("multiplier") or 1), 2)
+
+				# Derive OT hours from worked_hours - standard_working_hours when still empty.
+				# Skip when OT slips exist but this date has no entry — no OT was recorded.
+				if not ot_hours and worked_hours and not has_ot_slips:
+					baseline = flt(std_hours_baseline) if std_hours_baseline is not None else 0
+					ot_hours = flt(max(worked_hours - baseline, 0), 2)
+
+				std_hours_display = flt(std_hours_baseline, 2) if std_hours_baseline is not None else None
+				if std_hours_display:
+					regular_hours = flt(min(worked_hours, std_hours_display), 2)
+				else:
+					regular_hours = flt(max(worked_hours - ot_hours, 0), 2)
+
+			applied_rate = meta_rate or (att.get("rate") if att else None)
+			applied_multiplier = meta_multiplier or (att.get("multiplier") if att else None) or 1
 
 			if ot_amount is None:
-				ot_amount = self._compute_ot_amount(ot_seconds, day)
+				rate = applied_rate
+				multiplier = applied_multiplier
+				if rate:
+					ot_amount = flt(flt(ot_hours) * flt(rate) * flt(multiplier), 2)
+				else:
+					ot_amount = self._compute_ot_amount(flt(ot_hours) * 3600, day)
 
-			project_value = meta_project if meta_project else (first_in.project if first_in and first_in.project else None)
+			project_value = (
+				(att.get("project") if att and att.get("project") else None)
+				or meta_project
+				or (first_in.project if first_in and first_in.project else (first_log.project if first_log and first_log.project else None))
+			)
 
 			self.append(
 				"attendance_breakup",
 				{
 					"date": day,
 					"attendance_status": status,
-					"check_in": first_in.time if first_in else None,
-					"check_out": last_out.time if last_out else None,
+					"check_in": check_in_time,
+					"check_out": check_out_time,
 					"project": project_value,
-					"regular_hours": flt(reg_seconds / 3600, 2),
+					"regular_hours": flt(regular_hours, 2),
 					"overtime_hours": flt(ot_hours, 2),
 					"overtime_amount": ot_amount,
-					"standard_working_hours": std_hours,
-					"rate": meta_rate,
-					"multiplier": meta_multiplier,
+					"standard_working_hours": std_hours_display,
+					"rate": applied_rate,
+					"multiplier": applied_multiplier,
 				},
 			)
 
-			total_regular_seconds += reg_seconds
-			total_ot_seconds += ot_seconds
-			total_ot_amount += ot_amount
+			total_regular_seconds += flt(regular_hours) * 3600
+			total_ot_seconds += flt(ot_hours) * 3600
+			total_ot_amount += flt(ot_amount)
+
+			day = add_days(day, 1)
 
 		self.total_regular_hours = flt(total_regular_seconds / 3600, 2)
 		self.total_overtime_hours = flt(total_ot_seconds / 3600, 2)
@@ -511,7 +596,7 @@ class SalarySlip(TransactionBase):
 					"multiplier": r.get("multiplier"),
 				}
 
-		return by_date_meta
+		return by_date_meta, bool(slip_names)
 
 	def _get_standard_working_hours(self, day):
 		"""Compute standard working hours from shift assignment/shift type for the given date."""
