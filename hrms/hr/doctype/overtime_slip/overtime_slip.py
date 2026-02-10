@@ -28,6 +28,14 @@ class OvertimeSlip(Document):
 
 		self.validate_overlap()
 		self.validate_overtime_date_and_duration()
+		self.calculate_total_overtime_duration()
+
+	def calculate_total_overtime_duration(self):
+		total_overtime_duration = 0.0
+		for detail in self.overtime_details:
+			if detail.overtime_duration:
+				total_overtime_duration += detail.overtime_duration
+		self.total_overtime_duration = total_overtime_duration
 
 	def on_submit(self):
 		self.process_overtime_slip()

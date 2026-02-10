@@ -41,3 +41,4 @@ hrms.patches.v16_0.fix_overtime_additional_salary_overwrite
 hrms.patches.v16_0.fix_overtime_component_payment_days
 hrms.patches.v16_0.restore_desktop_icons
 hrms.patches.v16_0.add_absenteeism_penalty_component
+hrms.patches.v16_0.fix_overtime_slip_total_duration
