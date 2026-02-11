@@ -516,7 +516,7 @@ class OvertimeSlip(Document):
 			else:
 				self._cached_salary_slip = None
 
-		if not components or not hasattr(self, "_cached_salary_slip"):
+		if not components or not getattr(self, "_cached_salary_slip", None):
 			return 0.0
 
 		# Check if payroll setting requires 30 days calculation regardless of attendance
