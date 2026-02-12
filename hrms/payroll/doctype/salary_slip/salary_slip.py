@@ -1219,14 +1219,8 @@ class SalarySlip(TransactionBase):
 		)
 
 	def _should_use_fixed_payment_days(self, payroll_settings) -> bool:
-		if not cint(payroll_settings.get("use_fixed_30_days_for_payment_days_calculation")):
-			return False
+		return bool(cint(payroll_settings.get("use_fixed_30_days_for_payment_days_calculation")))
 
-		# Apply fixed-30 for full payroll cycle computation.
-		# For partial cycles (joining/relieving within period), keep prorated behavior.
-		return getdate(self.actual_start_date) == getdate(self.start_date) and getdate(
-			self.actual_end_date
-		) == getdate(self.end_date)
 
 	def get_payment_days(self, include_holidays_in_total_working_days, force_fixed_30_days: bool = False):
 		if self.joining_date and self.joining_date > getdate(self.end_date):
@@ -1250,6 +1244,10 @@ class SalarySlip(TransactionBase):
 
 		if force_fixed_30_days:
 			payment_days = 30
+			holidays = None
+			if not cint(include_holidays_in_total_working_days):
+				holidays = self.get_holidays_for_employee(self.start_date, self.end_date)
+			payment_days -= self._get_days_outside_period(include_holidays_in_total_working_days, holidays)
 
 		return payment_days
 
