@@ -237,7 +237,10 @@
       "description": "check if company is providing the accommodation to the employee.",
       "fieldname": "accommodation",
       "fieldtype": "Check",
-      "label": "Accommodation""fieldname": "column_break_kjvm",
+      "label": "Accommodation"
+    },
+    {
+      "fieldname": "column_break_kjvm",
       "fieldtype": "Column Break"
     },
     {
@@ -251,11 +254,6 @@
   ],
   "is_submittable": 1,
   "links": [],
-  "modified": "2025-12-13 18:52:45.259757",
-  "modified_by": "Administrator",
-  "module": "Payroll",
-  "name": "Salary Structure Assignment",
-  "naming_rule": "Expression (old style)",
   "modified": "2026-01-09 11:52:07.106968",
   "modified_by": "Administrator",
   "module": "Payroll",
