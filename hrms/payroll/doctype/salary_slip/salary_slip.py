@@ -991,10 +991,15 @@ class SalarySlip(TransactionBase):
 		self.leave_without_pay = lwp
 		self.total_working_days = 30 if use_fixed_payment_days else working_days
 
-		payment_days = self.get_payment_days(
-			payroll_settings.include_holidays_in_total_working_days,
-			force_fixed_30_days=use_fixed_payment_days,
-		)
+		# For attendance-based payroll, start with total working days (full period)
+		# and deduct absences. For leave-based, use actual employment period.
+		if payroll_settings.payroll_based_on == "Attendance":
+			payment_days = self.total_working_days
+		else:
+			payment_days = self.get_payment_days(
+				payroll_settings.include_holidays_in_total_working_days,
+				force_fixed_30_days=use_fixed_payment_days,
+			)
 
 		# Apply absenteeism penalty (extra one-day deduction per absent day) when enabled on shift type
 		self.apply_absenteeism_penalty()
@@ -1092,27 +1097,22 @@ class SalarySlip(TransactionBase):
 
 			if payroll_settings.payroll_based_on == "Attendance":
 				self.payment_days -= flt(absent)
-				print("payment_days6",self.payment_days)
 
 			consider_unmarked_attendance_as = payroll_settings.consider_unmarked_attendance_as or "Present"
 
 			if payroll_settings.payroll_based_on == "Attendance":
 				if consider_unmarked_attendance_as == "Absent":
-					print("consider_unmarked_attendance_as",consider_unmarked_attendance_as)
 					unmarked_days = self.get_unmarked_days(
 						payroll_settings.include_holidays_in_total_working_days, holidays
 					)
-					print("unmarked_days",unmarked_days)
 					self.absent_days += unmarked_days  # will be treated as absent
 					self.payment_days -= unmarked_days
-					print("payment_days5",self.payment_days)
 				half_absent_days = self.get_half_absent_days(
 					consider_marked_attendance_on_holidays,
 					holidays,
 				)
 				self.absent_days += half_absent_days * daily_wages_fraction_for_half_day
 				self.payment_days -= half_absent_days * daily_wages_fraction_for_half_day
-				print("payment_days7",self.payment_days)
 		else:
 			self.payment_days = 0
 
@@ -1123,11 +1123,18 @@ class SalarySlip(TransactionBase):
 
 		base_working_days = getattr(self, "_attendance_total_working_days", self.total_working_days)
 
-		unmarked_days = (
-			base_working_days
-			- self._get_days_outside_period(include_holidays_in_total_working_days, holidays)
-			- self._get_marked_attendance_days(holidays)
-		)
+		# For attendance-based payroll, don't subtract days outside period
+		# (joining/relieving dates are handled via absence counting)
+		payroll_based_on = frappe.db.get_single_value("Payroll Settings", "payroll_based_on")
+		
+		if payroll_based_on == "Attendance":
+			unmarked_days = base_working_days - self._get_marked_attendance_days(holidays)
+		else:
+			unmarked_days = (
+				base_working_days
+				- self._get_days_outside_period(include_holidays_in_total_working_days, holidays)
+				- self._get_marked_attendance_days(holidays)
+			)
 
 		if include_holidays_in_total_working_days and holidays:
 			unmarked_days -= self._get_number_of_holidays(holidays)
@@ -1141,7 +1148,7 @@ class SalarySlip(TransactionBase):
 			frappe.qb.from_(Attendance)
 			.select(Count("*"))
 			.where(
-				(Attendance.attendance_date.between(self.actual_start_date, self.actual_end_date))
+				(Attendance.attendance_date.between(self.start_date, self.end_date))
 				& (Attendance.employee == self.employee)
 				& (Attendance.docstatus == 1)
 				& (Attendance.status == "Half Day")
@@ -1197,7 +1204,7 @@ class SalarySlip(TransactionBase):
 			frappe.qb.from_(Attendance)
 			.select(Count("*"))
 			.where(
-				(Attendance.attendance_date.between(self.actual_start_date, self.actual_end_date))
+				(Attendance.attendance_date.between(self.start_date, self.end_date))
 				& (Attendance.employee == self.employee)
 				& (Attendance.docstatus == 1)
 			)
@@ -1351,8 +1358,10 @@ class SalarySlip(TransactionBase):
 		absent = 0
 
 		leave_type_map = self.get_leave_type_map()
+		# Use start_date and end_date instead of actual_start_date to get all attendance records
+		# The actual_start_date may be affected by mid-period salary structure assignments
 		attendance_details = self.get_employee_attendance(
-			start_date=self.actual_start_date, end_date=self.actual_end_date
+			start_date=self.start_date, end_date=self.end_date
 		)
 
 		for d in attendance_details:
