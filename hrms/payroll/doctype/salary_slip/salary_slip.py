@@ -676,12 +676,14 @@ class SalarySlip(TransactionBase):
 				)
 
 	def create_benefits_ledger_entry(self):
-		if self.benefit_ledger_components:
+		benefit_ledger_components = getattr(self, "benefit_ledger_components", None)
+		if benefit_ledger_components:
+			payroll_period = getattr(self, "payroll_period", None)
 			args = {
-				"payroll_period": self.payroll_period.name if self.payroll_period else None,
-				"benefit_ledger_components": self.benefit_ledger_components,
-				"benefit_details_parent": self.benefit_details_parent,
-				"benefit_details_doctype": self.benefit_details_doctype,
+				"payroll_period": payroll_period.name if payroll_period else None,
+				"benefit_ledger_components": benefit_ledger_components,
+				"benefit_details_parent": getattr(self, "benefit_details_parent", None),
+				"benefit_details_doctype": getattr(self, "benefit_details_doctype", None),
 			}
 			create_employee_benefit_ledger_entry(self, args)
 
@@ -1113,6 +1115,18 @@ class SalarySlip(TransactionBase):
 				)
 				self.absent_days += half_absent_days * daily_wages_fraction_for_half_day
 				self.payment_days -= half_absent_days * daily_wages_fraction_for_half_day
+
+			# When using fixed 30-day mode, the actual period may have more days than 30
+			# (e.g. 31 days). Absent days are counted from the full actual period, so
+			# they overcount by the difference (actual - 30). Adjust absent_days down
+			# by the overshoot so payment_days correctly reflects present days.
+			if use_fixed_payment_days and payroll_settings.payroll_based_on == "Attendance":
+				actual_days_in_period = date_diff(self.end_date, self.start_date) + 1
+				overshoot = actual_days_in_period - flt(self.total_working_days)
+				if overshoot > 0 and flt(self.absent_days) > 0:
+					adjustment = min(overshoot, flt(self.absent_days))
+					self.absent_days = flt(self.absent_days) - adjustment
+					self.payment_days = flt(self.total_working_days) - flt(lwp) - flt(self.absent_days)
 		else:
 			self.payment_days = 0
 
