@@ -678,7 +678,7 @@ class SalarySlip(TransactionBase):
 	def create_benefits_ledger_entry(self):
 		if self.benefit_ledger_components:
 			args = {
-				"payroll_period": self.payroll_period.name,
+				"payroll_period": self.payroll_period.name if self.payroll_period else None,
 				"benefit_ledger_components": self.benefit_ledger_components,
 				"benefit_details_parent": self.benefit_details_parent,
 				"benefit_details_doctype": self.benefit_details_doctype,
