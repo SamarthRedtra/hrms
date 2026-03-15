@@ -101,10 +101,6 @@ jinja = {
 after_install = "hrms.install.after_install"
 after_migrate = "hrms.setup.update_select_perm_after_install"
 
-# Apply desktop icons override
-from hrms.utils.desktop_icons import patch_get_desktop_icons
-patch_get_desktop_icons()
-
 setup_wizard_complete = "hrms.subscription_utils.update_erpnext_access"
 
 # Uninstallation
@@ -158,7 +154,6 @@ override_doctype_class = {
 	"Timesheet": "hrms.overrides.employee_timesheet.EmployeeTimesheet",
 	"Payment Entry": "hrms.overrides.employee_payment_entry.EmployeePaymentEntry",
 	"Project": "hrms.overrides.employee_project.EmployeeProject",
-	"Desktop Icon": "hrms.overrides.desktop_icon.DesktopIcon",
 }
 
 # Document Events
