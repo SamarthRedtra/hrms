@@ -35,6 +35,10 @@
   "mandatory_benefit_application",
   "column_break_zi9y",
   "create_overtime_slip",
+  "salary_structure_update_section",
+  "enable_bulk_component_update_for_submitted_salary_structures",
+  "bulk_component_update_type",
+  "bulk_component_to_add",
   "food_allowance_section",
   "allocate_food_allowance",
   "project_mandatory_for_checkin"
@@ -209,6 +213,32 @@
    "fieldname": "create_overtime_slip",
    "fieldtype": "Check",
    "label": "Create Overtime Slip For Eligible Employee(s)"
+  },
+  {
+   "fieldname": "salary_structure_update_section",
+   "fieldtype": "Section Break",
+   "label": "Submitted Salary Structure Update"
+  },
+  {
+   "default": "0",
+   "description": "If enabled, a bulk action can add the selected component to submitted salary structures.",
+   "fieldname": "enable_bulk_component_update_for_submitted_salary_structures",
+   "fieldtype": "Check",
+   "label": "Enable Bulk Component Update For Submitted Salary Structures"
+  },
+  {
+   "depends_on": "eval:doc.enable_bulk_component_update_for_submitted_salary_structures == 1",
+   "fieldname": "bulk_component_update_type",
+   "fieldtype": "Select",
+   "label": "Component Type",
+   "options": "Earning\nDeduction"
+  },
+  {
+   "depends_on": "eval:doc.enable_bulk_component_update_for_submitted_salary_structures == 1",
+   "fieldname": "bulk_component_to_add",
+   "fieldtype": "Link",
+   "label": "Salary Component To Add",
+   "options": "Salary Component"
   },
   {
    "default": "0",
