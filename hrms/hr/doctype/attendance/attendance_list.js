@@ -11,14 +11,24 @@ frappe.listview_settings["Attendance"] = {
 		}
 	},
 
+	_as_date_str: function (value) {
+		if (!value) {
+			return null;
+		}
+		if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+			return value.slice(0, 10);
+		}
+		const m = moment(value);
+		return m.isValid() ? m.format("YYYY-MM-DD") : null;
+	},
+
 	onload: function (list_view) {
 		let me = this;
 
 		list_view.page.add_inner_button(__("Mark Attendance"), function () {
-			let first_day_of_month = moment().startOf("month");
-
-			if (moment().toDate().getDate() === 1) {
-				first_day_of_month = first_day_of_month.subtract(1, "month");
+			let first_day = moment().startOf("month");
+			if (moment().date() === 1) {
+				first_day = first_day.subtract(1, "month");
 			}
 
 			let dialog = new frappe.ui.Dialog({
@@ -47,7 +57,7 @@ frappe.listview_settings["Attendance"] = {
 						fieldtype: "Date",
 						fieldname: "from_date",
 						reqd: 1,
-						default: first_day_of_month.toDate(),
+						default: first_day.format("YYYY-MM-DD"),
 						onchange: () => me.get_unmarked_days(dialog),
 					},
 					{
@@ -66,7 +76,7 @@ frappe.listview_settings["Attendance"] = {
 						fieldtype: "Date",
 						fieldname: "to_date",
 						reqd: 1,
-						default: moment().toDate(),
+						default: frappe.datetime.get_today(),
 						onchange: () => me.get_unmarked_days(dialog),
 					},
 					{
@@ -103,6 +113,14 @@ frappe.listview_settings["Attendance"] = {
 					},
 				],
 				primary_action(data) {
+					data.from_date = me._as_date_str(data.from_date);
+					data.to_date = me._as_date_str(data.to_date);
+					if (Array.isArray(data.unmarked_days)) {
+						data.unmarked_days = data.unmarked_days
+							.map((d) => me._as_date_str(d))
+							.filter(Boolean);
+					}
+
 					if (cur_dialog.no_unmarked_days_left) {
 						frappe.msgprint(
 							__(
@@ -162,7 +180,10 @@ frappe.listview_settings["Attendance"] = {
 
 	get_unmarked_days: function (dialog) {
 		let fields = dialog.fields_dict;
-		if (fields.employee.value && fields.from_date.value && fields.to_date.value) {
+		const from_date = this._as_date_str(fields.from_date.value);
+		const to_date = this._as_date_str(fields.to_date.value);
+
+		if (fields.employee.value && from_date && to_date) {
 			dialog.set_df_property("days_section", "hidden", 0);
 			dialog.set_df_property("status", "hidden", 0);
 			dialog.set_df_property("exclude_holidays", "hidden", 0);
@@ -171,33 +192,43 @@ frappe.listview_settings["Attendance"] = {
 			frappe
 				.call({
 					method: "hrms.hr.doctype.attendance.attendance.get_unmarked_days",
-					async: false,
 					args: {
 						employee: fields.employee.value,
-						from_date: fields.from_date.value,
-						to_date: fields.to_date.value,
+						from_date: from_date,
+						to_date: to_date,
 						exclude_holidays: fields.exclude_holidays.value,
 					},
 				})
 				.then((r) => {
-					var options = [];
+					const dates = r.message || [];
+					const options = dates
+						.map((day) => {
+							const value = this._as_date_str(day);
+							return {
+								label: moment(value, "YYYY-MM-DD").format("DD-MM-YYYY"),
+								value: value,
+								checked: 1,
+							};
+						})
+						.filter((opt) => opt.value);
 
-					for (var d in r.message) {
-						var momentObj = moment(r.message[d], "YYYY-MM-DD");
-						var date = momentObj.format("DD-MM-YYYY");
-						options.push({
-							label: date,
-							value: r.message[d],
-							checked: 1,
+					const field = dialog.fields_dict.unmarked_days;
+					if (field) {
+						field.df.options = options;
+						field.refresh();
+					} else {
+						dialog.set_df_property("unmarked_days", "options", options);
+					}
+					dialog.no_unmarked_days_left = options.length === 0;
+
+					if (options.length === 0) {
+						frappe.show_alert({
+							message: __(
+								"All days in this range already have Attendance. Mark Attendance only creates missing days — edit/cancel existing records to change them."
+							),
+							indicator: "orange",
 						});
 					}
-
-					dialog.set_df_property(
-						"unmarked_days",
-						"options",
-						options.length > 0 ? options : [],
-					);
-					dialog.no_unmarked_days_left = options.length === 0;
 				});
 		}
 	},
