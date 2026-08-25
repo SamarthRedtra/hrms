@@ -148,6 +148,41 @@ class TestShiftType(IntegrationTestCase):
 		)
 		self.assertEqual(attendance, "Present")
 
+	def test_mark_attendance_for_specific_employees_only(self):
+		from hrms.hr.doctype.employee_checkin.test_employee_checkin import make_checkin
+
+		emp1 = make_employee("test_shift_att_emp1@example.com", company="_Test Company")
+		emp2 = make_employee("test_shift_att_emp2@example.com", company="_Test Company")
+		shift_type = setup_shift_type(shift_type="Test Specific Emp Shift")
+		date = getdate()
+		make_shift_assignment(shift_type.name, emp1, date)
+		make_shift_assignment(shift_type.name, emp2, date)
+
+		for emp in (emp1, emp2):
+			make_checkin(emp, datetime.combine(date, get_time("08:00:00")))
+			make_checkin(emp, datetime.combine(date, get_time("12:00:00")))
+
+		shift_type.process_auto_attendance(employees=[emp1])
+
+		self.assertEqual(
+			frappe.db.get_value("Attendance", {"employee": emp1, "shift": shift_type.name}, "status"),
+			"Present",
+		)
+		self.assertFalse(frappe.db.exists("Attendance", {"employee": emp2, "shift": shift_type.name}))
+		emp2_logs = frappe.get_all(
+			"Employee Checkin",
+			filters={"employee": emp2, "shift": shift_type.name},
+			fields=["name", "attendance"],
+		)
+		self.assertEqual(len(emp2_logs), 2)
+		self.assertTrue(all(not log.attendance for log in emp2_logs))
+
+		shift_type.process_auto_attendance()
+		self.assertEqual(
+			frappe.db.get_value("Attendance", {"employee": emp2, "shift": shift_type.name}, "status"),
+			"Present",
+		)
+
 	def test_mark_attendance_with_different_shift_start_time(self):
 		"""Tests whether attendance is marked correctly if shift configuration is changed midway"""
 		from hrms.hr.doctype.employee_checkin.test_employee_checkin import make_checkin

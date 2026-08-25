@@ -275,4 +275,116 @@ $.extend(hrms, {
 			__("Shift Tools"),
 		);
 	},
+
+	mark_shift_attendance: (frm) => {
+		if (!frm.doc.enable_auto_attendance) {
+			frm.scroll_to_field("enable_auto_attendance");
+			frappe.throw(__("Please Enable Auto Attendance and complete the setup first."));
+		}
+
+		if (!frm.doc.process_attendance_after) {
+			frm.scroll_to_field("process_attendance_after");
+			frappe.throw(__("Please set {0}.", [__("Process Attendance After").bold()]));
+		}
+
+		if (!frm.doc.last_sync_of_checkin) {
+			frm.scroll_to_field("last_sync_of_checkin");
+			frappe.throw(__("Please set {0}.", [__("Last Sync of Checkin").bold()]));
+		}
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Mark Attendance"),
+			size: "large",
+			fields: [
+				{
+					fieldname: "employee_scope",
+					label: __("Process For"),
+					fieldtype: "Select",
+					options: "All Employees\nSpecific Employees",
+					default: "All Employees",
+					reqd: 1,
+					onchange: () => {
+						if (dialog.get_value("employee_scope") === "Specific Employees") {
+							load_employees();
+						}
+					},
+				},
+				{
+					fieldname: "employee_filter",
+					label: __("Search Employees"),
+					fieldtype: "Data",
+					depends_on: "eval:doc.employee_scope=='Specific Employees'",
+				},
+				{
+					fieldname: "employees",
+					label: __("Employees"),
+					fieldtype: "MultiCheck",
+					select_all: true,
+					columns: "18rem",
+					options: [],
+					sort_options: false,
+					depends_on: "eval:doc.employee_scope=='Specific Employees'",
+				},
+			],
+			primary_action_label: __("Mark Attendance"),
+			primary_action: (values) => {
+				const specific = values.employee_scope === "Specific Employees";
+				const employees = values.employees || [];
+				if (specific && !employees.length) {
+					frappe.msgprint(__("Select at least one employee"));
+					return;
+				}
+				dialog.hide();
+				frm.call({
+					doc: frm.doc,
+					method: "process_auto_attendance",
+					args: specific ? { employees } : {},
+					freeze: true,
+					callback: () => {
+						frappe.msgprint(__("Attendance has been marked as per employee check-ins"));
+					},
+				});
+			},
+		});
+
+		const load_employees = () => {
+			const field = dialog.fields_dict.employees;
+			if ((field.df.options || []).length) {
+				return;
+			}
+			frm.call({
+				method: "get_employees_for_mark_attendance",
+				doc: frm.doc,
+			}).then((r) => {
+				field.df.options = (r.message || []).map((emp) => {
+					const name = emp.label || emp.value;
+					return {
+						label: `${frappe.utils.escape_html(name)} (${frappe.utils.escape_html(emp.value)})`,
+						value: emp.value,
+						checked: 0,
+					};
+				});
+				field.refresh();
+				field.$wrapper.find(".checkbox-options").css({
+					maxHeight: "360px",
+					overflowY: "auto",
+				});
+			});
+		};
+
+		const filter_checkboxes = (search_text) => {
+			const search = (search_text || "").toLowerCase();
+			const field = dialog.fields_dict.employees;
+			(field.options || []).forEach((opt) => {
+				if (!opt.$checkbox) return;
+				const hay = `${opt.label} ${opt.value}`.toLowerCase();
+				opt.$checkbox.toggle(!search || hay.includes(search));
+			});
+		};
+
+		dialog.show();
+		dialog.fields_dict.employee_filter.$input.on("input", function () {
+			filter_checkboxes($(this).val());
+		});
+	},
 });

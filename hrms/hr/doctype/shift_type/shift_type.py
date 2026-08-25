@@ -110,7 +110,7 @@ class ShiftType(Document):
 		)
 
 	@frappe.whitelist()
-	def process_auto_attendance(self):
+	def process_auto_attendance(self, employees=None):
 		if (
 			not cint(self.enable_auto_attendance)
 			or not self.process_attendance_after
@@ -118,9 +118,10 @@ class ShiftType(Document):
 		):
 			return
 
+		employee_filter = self._normalize_employee_filter(employees)
 		self._holiday_cache = {}
 
-		logs = self.get_employee_checkins()
+		logs = self.get_employee_checkins(employee_filter)
 		
 		if cint(self.enable_flexible_log_pairing):
 			# For flexible pairing, group by employee and actual IN time date
@@ -205,6 +206,9 @@ class ShiftType(Document):
 		frappe.db.commit()  # nosemgrep
 
 		assigned_employees = self.get_assigned_employees(self.process_attendance_after, True)
+		if employee_filter is not None:
+			allowed = set(employee_filter)
+			assigned_employees = [employee for employee in assigned_employees if employee in allowed]
 		# mark absent in batches & commit to avoid losing progress since this tries to process remaining attendance
 		# right from "Process Attendance After" to "Last Sync of Checkin"
 		for batch in create_batch(assigned_employees, EMPLOYEE_CHUNK_SIZE):
@@ -214,7 +218,44 @@ class ShiftType(Document):
 
 			frappe.db.commit()  # nosemgrep
 
-	def get_employee_checkins(self) -> list[dict]:
+	@frappe.whitelist()
+	def get_employees_for_mark_attendance(self) -> list[dict]:
+		employee_names = set(self.get_assigned_employees(self.process_attendance_after, True))
+		pending_filters = {
+			"shift": self.name,
+			"skip_auto_attendance": 0,
+			"attendance": ("is", "not set"),
+			"offshift": 0,
+		}
+		if self.process_attendance_after:
+			pending_filters["time"] = (">=", self.process_attendance_after)
+		employee_names.update(
+			frappe.get_all("Employee Checkin", filters=pending_filters, pluck="employee", distinct=True)
+		)
+		if not employee_names:
+			return []
+		employees = frappe.get_all(
+			"Employee",
+			filters={"name": ("in", list(employee_names))},
+			fields=["name", "employee_name"],
+			order_by="employee_name",
+		)
+		return [
+			{"value": employee.name, "label": employee.employee_name, "description": employee.name}
+			for employee in employees
+		]
+
+	def get_employee_checkins(self, employees: list[str] | None = None) -> list[dict]:
+		filters = {
+			"skip_auto_attendance": 0,
+			"attendance": ("is", "not set"),
+			"time": (">=", self.process_attendance_after),
+			"shift_actual_end": ("<", self.last_sync_of_checkin),
+			"shift": self.name,
+			"offshift": 0,
+		}
+		if employees:
+			filters["employee"] = ("in", employees)
 		return frappe.get_all(
 			"Employee Checkin",
 			fields=[
@@ -230,14 +271,7 @@ class ShiftType(Document):
 				"device_id",
 				"overtime_type",
 			],
-			filters={
-				"skip_auto_attendance": 0,
-				"attendance": ("is", "not set"),
-				"time": (">=", self.process_attendance_after),
-				"shift_actual_end": ("<", self.last_sync_of_checkin),
-				"shift": self.name,
-				"offshift": 0,
-			},
+			filters=filters,
 			order_by="employee,time",
 		)
 
@@ -464,6 +498,18 @@ class ShiftType(Document):
 						),
 					}
 				).insert(ignore_permissions=True)
+
+	def _normalize_employee_filter(self, employees) -> list[str] | None:
+		if employees in (None, ""):
+			return None
+		if isinstance(employees, str):
+			employees = frappe.parse_json(employees)
+		if not isinstance(employees, (list, tuple, set)):
+			employees = [employees]
+		normalized = sorted({str(employee).strip() for employee in employees if employee})
+		if not normalized:
+			frappe.throw(_("Select at least one employee"))
+		return normalized
 
 	def _group_logs_by_in_time(self, logs):
 		"""Group logs by employee and the date of the first IN punch for flexible night shifts."""
