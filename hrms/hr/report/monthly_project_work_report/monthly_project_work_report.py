@@ -59,11 +59,24 @@ def get_data(filters: dict):
 		filters=checkin_filters,
 		order_by="employee asc, time asc",
 	)
+	allowed_projects = _get_company_projects(filters.get("company"))
+	if allowed_projects is not None:
+		checkins = [row for row in checkins if row.project in allowed_projects]
 	if not checkins:
 		checkins = []
 
 	ot_map = get_overtime_by_employee_project(filters)
+	if allowed_projects is not None:
+		ot_map = {
+			key: value for key, value in ot_map.items()
+			if key[1] in allowed_projects
+		}
 	project_cost_map = get_project_cost_map(filters)
+	if allowed_projects is not None:
+		project_cost_map = {
+			key: value for key, value in project_cost_map.items()
+			if key[1] in allowed_projects
+		}
 
 	# Group by employee first, then pair IN/OUT and aggregate by project
 	employee_logs = defaultdict(list)
@@ -249,6 +262,8 @@ def get_project_cost_map(filters: dict) -> dict[tuple[str, str], dict]:
 	}
 	if filters.get("employee"):
 		slip_filters["employee"] = filters["employee"]
+	if filters.get("company"):
+		slip_filters["company"] = filters["company"]
 	salary_slips = frappe.get_all(
 		"Salary Slip",
 		filters=slip_filters,
@@ -280,3 +295,9 @@ def get_project_cost_map(filters: dict) -> dict[tuple[str, str], dict]:
 			entry["cost"] += flt(row.get("cost") or 0)
 
 	return cost_map
+
+
+def _get_company_projects(company: str | None) -> set[str] | None:
+	if not company:
+		return None
+	return set(frappe.get_all("Project", filters={"company": company}, pluck="name"))
