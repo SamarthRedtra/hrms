@@ -15,8 +15,8 @@ frappe.query_reports["Project Wise Employee Cost"] = {
 			default: frappe.datetime.month_end(),
 		},
 		{
-			fieldname: "company",
-			label: __("Company"),
+			fieldname: "project_company",
+			label: __("Project Company"),
 			fieldtype: "Link",
 			options: "Company",
 			reqd: 1,
@@ -28,7 +28,7 @@ frappe.query_reports["Project Wise Employee Cost"] = {
 			fieldtype: "Link",
 			options: "Project",
 			get_query() {
-				return { filters: { company: frappe.query_report.get_filter_value("company") } };
+				return { filters: { company: frappe.query_report.get_filter_value("project_company") } };
 			},
 		},
 	],

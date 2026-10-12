@@ -3,7 +3,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from hrms.hr.report.project_wise_employee_cost.project_wise_employee_cost import get_data
+from hrms.hr.report.project_wise_employee_cost.project_wise_employee_cost import SALARY_COMPANY, get_data
 
 
 class TestProjectWiseEmployeeCost(FrappeTestCase):
@@ -45,7 +45,7 @@ class TestProjectWiseEmployeeCost(FrappeTestCase):
 			frappe._dict({"name": "PROJ-002", "project_name": "Project Two"}),
 		]
 
-		data = get_data({"company": "Test Company", "from_date": "2026-09-01", "to_date": "2026-09-30"})
+		data = get_data({"project_company": "Test Company", "from_date": "2026-09-01", "to_date": "2026-09-30"})
 
 		self.assertEqual(len(data), 2)
 		first = data[0]
@@ -56,3 +56,10 @@ class TestProjectWiseEmployeeCost(FrappeTestCase):
 		self.assertEqual(first["overtime_hours"], 6)
 		self.assertEqual(first["allocated_salary_cost"], 1600)
 		self.assertEqual(first["overtime_cost"], 150)
+
+		mock_monthly_data.assert_called_once_with({
+			"from_date": "2026-09-01",
+			"to_date": "2026-09-30",
+			"project_company": "Test Company",
+			"company": SALARY_COMPANY,
+		})

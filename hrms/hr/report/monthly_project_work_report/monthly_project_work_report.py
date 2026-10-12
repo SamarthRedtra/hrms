@@ -59,7 +59,9 @@ def get_data(filters: dict):
 		filters=checkin_filters,
 		order_by="employee asc, time asc",
 	)
-	allowed_projects = _get_company_projects(filters.get("company"))
+	# `company` remains the salary-slip company for existing callers. Project Wise
+	# Employee Cost supplies `project_company` when payroll and projects differ.
+	allowed_projects = _get_company_projects(filters.get("project_company") or filters.get("company"))
 	if allowed_projects is not None:
 		checkins = [row for row in checkins if row.project in allowed_projects]
 	if not checkins:

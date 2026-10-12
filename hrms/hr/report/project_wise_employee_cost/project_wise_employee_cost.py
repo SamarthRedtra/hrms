@@ -8,6 +8,8 @@ from hrms.hr.report.monthly_project_work_report.monthly_project_work_report impo
 	get_data as get_monthly_project_work_data,
 )
 
+SALARY_COMPANY = "SKADA CONSTRUCTION L.L.C"
+
 
 def execute(filters=None):
 	filters = filters or {}
@@ -16,8 +18,8 @@ def execute(filters=None):
 
 
 def validate_filters(filters: dict) -> None:
-	if not filters.get("from_date") or not filters.get("to_date") or not filters.get("company"):
-		frappe.throw(_("From Date, To Date and Company are required"))
+	if not filters.get("from_date") or not filters.get("to_date") or not filters.get("project_company"):
+		frappe.throw(_("From Date, To Date and Project Company are required"))
 	if getdate(filters["from_date"]) > getdate(filters["to_date"]):
 		frappe.throw(_("From Date cannot be after To Date"))
 
@@ -36,7 +38,12 @@ def get_columns() -> list[dict]:
 
 
 def get_data(filters: dict) -> list[dict]:
-	monthly_rows = get_monthly_project_work_data(filters)
+	monthly_filters = {
+		**filters,
+		"company": SALARY_COMPANY,
+		"project_company": filters["project_company"],
+	}
+	monthly_rows = get_monthly_project_work_data(monthly_filters)
 	grouped = defaultdict(_new_project_row)
 
 	for row in monthly_rows:
